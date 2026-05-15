@@ -2,6 +2,7 @@
 #define KIT_H
 
 #include <stdarg.h>
+#include <stdbool.h>
 #include <stddef.h>
 
 typedef enum {
@@ -104,6 +105,10 @@ void *kit__arr_grow(void *data, size_t *cap, size_t item_size);
     (arr)->cap = 0;                                                            \
   } while (0)
 
+bool kit_needs_rebuild(const char *source, const char *binary, bool *out_needs_rebuild);
+bool kit_rebuild(const char *source, const char *binary, const char *cc_template);
+bool kit_auto_rebuild(int argc, char **argv, const char *source_file, const char *cc_template);
+
 #ifdef KIT_IMPLEMENTATION
 
 #include <ctype.h>
@@ -111,6 +116,7 @@ void *kit__arr_grow(void *data, size_t *cap, size_t item_size);
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <time.h>
@@ -456,6 +462,94 @@ Kit_Result kit_run_argv(const char *const argv[]) {
 
   r.exit_code = WEXITSTATUS(status);
   return kit__result(r.exit_code == 0 ? KIT_OK : KIT_ERR_SPAWN, r.exit_code, 0, label);
+}
+
+bool kit_needs_rebuild(const char *source, const char *binary, bool *out_needs_rebuild) {
+  struct stat src_stat, bin_stat;
+
+  if (!source || !binary || !out_needs_rebuild)
+    return false;
+
+  if (stat(source, &src_stat) != 0)
+    return false;
+
+  if (stat(binary, &bin_stat) != 0) {
+    *out_needs_rebuild = true;
+    return true;
+  }
+
+  *out_needs_rebuild = src_stat.st_mtime > bin_stat.st_mtime;
+  return true;
+}
+
+bool kit_rebuild(const char *source, const char *binary, const char *cc_template) {
+  char cmd[1024];
+
+  if (!source || !binary || !cc_template) {
+    kit__log(KIT_LOG_ERROR, "kit_rebuild: NULL argument");
+    return false;
+  }
+
+  bool needs_rebuild;
+  if (!kit_needs_rebuild(source, binary, &needs_rebuild))
+    return false;
+
+  if (!needs_rebuild) {
+    kit__log(KIT_LOG_DEBUG, "kit_rebuild: %s is up to date", binary);
+    return true;
+  }
+
+  kit__log(KIT_LOG_INFO, "kit_rebuild: recompiling %s -> %s", source, binary);
+
+  int n = snprintf(cmd, sizeof(cmd), cc_template, binary, source);
+  if (n < 0 || (size_t)n >= sizeof(cmd)) {
+    kit__log(KIT_LOG_ERROR, "kit_rebuild: command too long");
+    return false;
+  }
+
+  Kit_Result r = kit_run(cmd);
+  if (r.status != KIT_OK) {
+    kit__log(KIT_LOG_ERROR, "kit_rebuild: compilation failed");
+    return false;
+  }
+
+  kit__log(KIT_LOG_INFO, "kit_rebuild: compilation successful");
+  return true;
+}
+
+bool kit_auto_rebuild(int argc, char **argv, const char *source_file, const char *cc_template) {
+  const char *binary = (argc > 0 && argv && argv[0]) ? argv[0] : "a.out";
+
+  char bin_path[512];
+  if (binary[0] != '/' && binary[0] != '.') {
+    snprintf(bin_path, sizeof(bin_path), "./%s", binary);
+    binary = bin_path;
+  }
+
+  bool needs_rebuild;
+  if (!kit_needs_rebuild(source_file, binary, &needs_rebuild)) {
+    kit__log(KIT_LOG_ERROR, "kit_auto_rebuild: error checking files");
+    return false;
+  }
+
+  if (!needs_rebuild) {
+    kit__log(KIT_LOG_DEBUG, "kit_auto_rebuild: no rebuild needed");
+    return true;
+  }
+
+  kit__log(KIT_LOG_INFO, "kit_auto_rebuild: source changed, recompiling...");
+
+  if (!kit_rebuild(source_file, binary, cc_template)) {
+    kit__log(KIT_LOG_ERROR, "kit_auto_rebuild: rebuild failed, continuing with old binary");
+    return false;
+  }
+
+  kit__log(KIT_LOG_INFO, "kit_auto_rebuild: restarting...");
+
+  execv(binary, argv);
+
+  kit__log(KIT_LOG_ERROR, "kit_auto_rebuild: execv failed: %s", strerror(errno));
+  return false;
 }
 
 #endif

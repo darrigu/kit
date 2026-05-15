@@ -720,7 +720,156 @@ TEST(performance_arr_growth) {
   kit_arr_free(&arr);
 }
 
-int main(void) {
+TEST(kit_needs_rebuild_null_args) {
+  bool result;
+  ASSERT_FALSE(kit_needs_rebuild(NULL, "binary", &result));
+  ASSERT_FALSE(kit_needs_rebuild("source", NULL, &result));
+  ASSERT_FALSE(kit_needs_rebuild("source", "binary", NULL));
+  ASSERT_FALSE(kit_needs_rebuild(NULL, NULL, NULL));
+}
+
+TEST(kit_needs_rebuild_missing_source) {
+  bool result;
+  ASSERT_FALSE(kit_needs_rebuild("/nonexistent/source.c", "/tmp/fake_binary", &result));
+}
+
+TEST(kit_needs_rebuild_missing_binary) {
+  bool result;
+  ASSERT_TRUE(kit_needs_rebuild(__FILE__, "/tmp/nonexistent_binary_12345", &result));
+  ASSERT_TRUE(result);
+}
+
+TEST(kit_needs_rebuild_up_to_date) {
+  bool result;
+  const char *src = "/tmp/kit_test_rebuild_src.c";
+  const char *bin = "/tmp/kit_test_rebuild_bin";
+
+  FILE *f = fopen(src, "w");
+  ASSERT_NONNULL(f);
+  fprintf(f, "int main(void) { return 0; }\n");
+  fclose(f);
+
+  char cmd[256];
+  snprintf(cmd, sizeof(cmd), "cc -o %s %s", bin, src);
+  Kit_Result r = kit_run(cmd);
+  ASSERT_EQ(r.status, KIT_OK);
+
+  ASSERT_TRUE(kit_needs_rebuild(src, bin, &result));
+  ASSERT_FALSE(result);
+
+  unlink(src);
+  unlink(bin);
+}
+
+TEST(kit_needs_rebuild_source_newer) {
+  bool result;
+  const char *src = "/tmp/kit_test_rebuild_src2.c";
+  const char *bin = "/tmp/kit_test_rebuild_bin2";
+
+  FILE *f = fopen(src, "w");
+  ASSERT_NONNULL(f);
+  fprintf(f, "int main(void) { return 0; }\n");
+  fclose(f);
+
+  char cmd[256];
+  snprintf(cmd, sizeof(cmd), "cc -o %s %s", bin, src);
+  Kit_Result r = kit_run(cmd);
+  ASSERT_EQ(r.status, KIT_OK);
+
+  struct timespec ts = {1, 0};
+  nanosleep(&ts, NULL);
+
+  f = fopen(src, "a");
+  ASSERT_NONNULL(f);
+  fprintf(f, "// modified\n");
+  fclose(f);
+
+  ASSERT_TRUE(kit_needs_rebuild(src, bin, &result));
+  ASSERT_TRUE(result);
+
+  unlink(src);
+  unlink(bin);
+}
+
+TEST(kit_rebuild_null_args) {
+  ASSERT_FALSE(kit_rebuild(NULL, "binary", "cc -o %s %s"));
+  ASSERT_FALSE(kit_rebuild("source", NULL, "cc -o %s %s"));
+  ASSERT_FALSE(kit_rebuild("source", "binary", NULL));
+  ASSERT_FALSE(kit_rebuild(NULL, NULL, NULL));
+}
+
+TEST(kit_rebuild_success) {
+  const char *src = "/tmp/kit_test_compile_src.c";
+  const char *bin = "/tmp/kit_test_compile_bin";
+
+  FILE *f = fopen(src, "w");
+  ASSERT_NONNULL(f);
+  fprintf(f, "int main(void) { return 42; }\n");
+  fclose(f);
+
+  ASSERT_TRUE(kit_rebuild(src, bin, "cc -o %s %s"));
+
+  struct stat st;
+  ASSERT_EQ(stat(bin, &st), 0);
+  ASSERT_TRUE(st.st_mode & S_IXUSR);
+
+  char cmd[256];
+  snprintf(cmd, sizeof(cmd), "%s", bin);
+  Kit_Result r = kit_run(cmd);
+  ASSERT_EQ(r.exit_code, 42);
+
+  unlink(src);
+  unlink(bin);
+}
+
+TEST(kit_rebuild_failure) {
+  const char *src = "/tmp/kit_test_bad_src.c";
+  const char *bin = "/tmp/kit_test_bad_bin";
+
+  FILE *f = fopen(src, "w");
+  ASSERT_NONNULL(f);
+  fprintf(f, "this is not valid C code !!!\n");
+  fclose(f);
+
+  ASSERT_FALSE(kit_rebuild(src, bin, "cc -o %s %s"));
+
+  unlink(src);
+  unlink(bin);
+}
+
+TEST(kit_rebuild_up_to_date) {
+  const char *src = "/tmp/kit_test_uptodate_src.c";
+  const char *bin = "/tmp/kit_test_uptodate_bin";
+
+  FILE *f = fopen(src, "w");
+  ASSERT_NONNULL(f);
+  fprintf(f, "int main(void) { return 0; }\n");
+  fclose(f);
+
+  char cmd[256];
+  snprintf(cmd, sizeof(cmd), "cc -o %s %s", bin, src);
+  Kit_Result r = kit_run(cmd);
+  ASSERT_EQ(r.status, KIT_OK);
+
+  ASSERT_TRUE(kit_rebuild(src, bin, "cc -o %s %s"));
+
+  unlink(src);
+  unlink(bin);
+}
+
+TEST(kit_auto_rebuild_null_args) {
+  ASSERT_FALSE(kit_auto_rebuild(0, NULL, NULL, NULL));
+}
+
+TEST(kit_auto_rebuild_missing_source) {
+  char *fake_argv[] = {"./fake_binary", NULL};
+  ASSERT_FALSE(kit_auto_rebuild(1, fake_argv, "/nonexistent/source.c", "cc -o %s %s"));
+}
+
+int main(int argc, char **argv) {
+  if (!kit_auto_rebuild(argc, argv, __FILE__, "cc -Wall -o %s %s"))
+    return 1;
+
   printf("Kit_Str Tests:\n");
   RUN_TEST(kit_str_from_null);
   RUN_TEST(kit_str_from_string);
@@ -770,6 +919,19 @@ int main(void) {
   RUN_TEST(kit_run_argv_failure);
   RUN_TEST(kit_run_argv_nonexistent);
   RUN_TEST(kit_run_argv_multicmd);
+
+  printf("\nKit_Rebuild Tests:\n");
+  RUN_TEST(kit_needs_rebuild_null_args);
+  RUN_TEST(kit_needs_rebuild_missing_source);
+  RUN_TEST(kit_needs_rebuild_missing_binary);
+  RUN_TEST(kit_needs_rebuild_up_to_date);
+  RUN_TEST(kit_needs_rebuild_source_newer);
+  RUN_TEST(kit_rebuild_null_args);
+  RUN_TEST(kit_rebuild_success);
+  RUN_TEST(kit_rebuild_failure);
+  RUN_TEST(kit_rebuild_up_to_date);
+  RUN_TEST(kit_auto_rebuild_null_args);
+  RUN_TEST(kit_auto_rebuild_missing_source);
 
   printf("\nIntegration & Edge Case Tests:\n");
   RUN_TEST(integration_str_and_arr);
