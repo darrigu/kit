@@ -442,10 +442,10 @@ TEST(kit_log_file_sink) {
   ASSERT_NONNULL(f);
 
   char buf[256];
-  int found = 0;
+  bool found = false;
   while (fgets(buf, sizeof(buf), f)) {
     if (strstr(buf, "file test message")) {
-      found = 1;
+      found = true;
       break;
     }
   }
