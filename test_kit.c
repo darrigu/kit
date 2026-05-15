@@ -482,7 +482,7 @@ TEST(kit_log_null_file_path) {
 }
 
 TEST(kit_run_null_cmd) {
-  Kit_Result r = kit_run(NULL);
+  Kit_Run_Result r = kit_run(NULL);
   ASSERT_EQ(r.status, KIT_ERR_ARGS);
 
   r = kit_run("");
@@ -490,25 +490,25 @@ TEST(kit_run_null_cmd) {
 }
 
 TEST(kit_run_success) {
-  Kit_Result r = kit_run("echo hello");
+  Kit_Run_Result r = kit_run("echo hello");
   ASSERT_EQ(r.status, KIT_OK);
   ASSERT_EQ(r.exit_code, 0);
 }
 
 TEST(kit_run_failure) {
-  Kit_Result r = kit_run("false");
+  Kit_Run_Result r = kit_run("false");
   ASSERT_EQ(r.status, KIT_ERR_SPAWN);
   ASSERT_EQ(r.exit_code, 1);
 }
 
 TEST(kit_run_nonexistent) {
-  Kit_Result r = kit_run("/nonexistent/path/to/command");
+  Kit_Run_Result r = kit_run("/nonexistent/path/to/command");
   ASSERT_EQ(r.status, KIT_ERR_SPAWN);
 }
 
 TEST(kit_run_capture_null_cmd) {
   char buf[64];
-  Kit_Result r = kit_run_capture(NULL, buf, sizeof(buf));
+  Kit_Run_Result r = kit_run_capture(NULL, buf, sizeof(buf));
   ASSERT_EQ(r.status, KIT_ERR_ARGS);
 
   r = kit_run_capture("", buf, sizeof(buf));
@@ -516,16 +516,16 @@ TEST(kit_run_capture_null_cmd) {
 }
 
 TEST(kit_run_capture_null_buf) {
-  Kit_Result r = kit_run_capture("echo test", NULL, 0);
+  Kit_Run_Result r = kit_run_capture("echo test", NULL, 0);
   ASSERT_EQ(r.status, KIT_ERR_ARGS);
 
-  Kit_Result r2 = kit_run_capture("echo test", NULL, 100);
+  Kit_Run_Result r2 = kit_run_capture("echo test", NULL, 100);
   ASSERT_EQ(r2.status, KIT_ERR_ARGS);
 }
 
 TEST(kit_run_capture_success) {
   char buf[256] = {0};
-  Kit_Result r = kit_run_capture("echo hello world", buf, sizeof(buf));
+  Kit_Run_Result r = kit_run_capture("echo hello world", buf, sizeof(buf));
 
   ASSERT_EQ(r.status, KIT_OK);
   ASSERT_EQ(r.exit_code, 0);
@@ -534,7 +534,7 @@ TEST(kit_run_capture_success) {
 
 TEST(kit_run_capture_truncated) {
   char buf[4] = {0};
-  Kit_Result r = kit_run_capture("echo hello", buf, sizeof(buf));
+  Kit_Run_Result r = kit_run_capture("echo hello", buf, sizeof(buf));
 
   ASSERT_EQ(r.status, KIT_ERR_BUF);
   ASSERT(buf[0] != '\0');
@@ -544,13 +544,13 @@ TEST(kit_run_capture_large_output) {
   char buf[4096];
   memset(buf, 0, sizeof(buf));
 
-  Kit_Result r = kit_run_capture("dd if=/dev/zero bs=1k count=2 2>/dev/null | tr '\\0' 'x'", buf, sizeof(buf));
+  Kit_Run_Result r = kit_run_capture("dd if=/dev/zero bs=1k count=2 2>/dev/null | tr '\\0' 'x'", buf, sizeof(buf));
 
   ASSERT(r.status == KIT_OK || r.status == KIT_ERR_BUF);
 }
 
 TEST(kit_run_argv_null) {
-  Kit_Result r = kit_run_argv(NULL);
+  Kit_Run_Result r = kit_run_argv(NULL);
   ASSERT_EQ(r.status, KIT_ERR_ARGS);
 
   const char *empty_argv[] = {NULL};
@@ -564,7 +564,7 @@ TEST(kit_run_argv_null) {
 
 TEST(kit_run_argv_success) {
   const char *argv[] = {"echo", "test", NULL};
-  Kit_Result r = kit_run_argv(argv);
+  Kit_Run_Result r = kit_run_argv(argv);
 
   ASSERT_EQ(r.status, KIT_OK);
   ASSERT_EQ(r.exit_code, 0);
@@ -572,7 +572,7 @@ TEST(kit_run_argv_success) {
 
 TEST(kit_run_argv_failure) {
   const char *argv[] = {"false", NULL};
-  Kit_Result r = kit_run_argv(argv);
+  Kit_Run_Result r = kit_run_argv(argv);
 
   ASSERT_EQ(r.status, KIT_ERR_SPAWN);
   ASSERT_EQ(r.exit_code, 1);
@@ -580,14 +580,14 @@ TEST(kit_run_argv_failure) {
 
 TEST(kit_run_argv_nonexistent) {
   const char *argv[] = {"/nonexistent/command", NULL};
-  Kit_Result r = kit_run_argv(argv);
+  Kit_Run_Result r = kit_run_argv(argv);
 
   ASSERT_EQ(r.status, KIT_ERR_SPAWN);
 }
 
 TEST(kit_run_argv_multicmd) {
   const char *argv[] = {"sh", "-c", "echo hello && exit 0", NULL};
-  Kit_Result r = kit_run_argv(argv);
+  Kit_Run_Result r = kit_run_argv(argv);
 
   ASSERT_EQ(r.status, KIT_OK);
   ASSERT_EQ(r.exit_code, 0);
@@ -646,7 +646,7 @@ TEST(integration_command_builder) {
   }
   kit_arr_push(&cmd, '\0');
 
-  Kit_Result r = kit_run_capture(cmd.data, (char[64]){0}, 64);
+  Kit_Run_Result r = kit_run_capture(cmd.data, (char[64]){0}, 64);
   ASSERT_EQ(r.status, KIT_OK);
 
   kit_arr_free(&cmd);
@@ -751,7 +751,7 @@ TEST(kit_needs_rebuild_up_to_date) {
 
   char cmd[256];
   snprintf(cmd, sizeof(cmd), "cc -o %s %s", bin, src);
-  Kit_Result r = kit_run(cmd);
+  Kit_Run_Result r = kit_run(cmd);
   ASSERT_EQ(r.status, KIT_OK);
 
   ASSERT_TRUE(kit_needs_rebuild(src, bin, &result));
@@ -773,7 +773,7 @@ TEST(kit_needs_rebuild_source_newer) {
 
   char cmd[256];
   snprintf(cmd, sizeof(cmd), "cc -o %s %s", bin, src);
-  Kit_Result r = kit_run(cmd);
+  Kit_Run_Result r = kit_run(cmd);
   ASSERT_EQ(r.status, KIT_OK);
 
   struct timespec ts = {1, 0};
@@ -815,7 +815,7 @@ TEST(kit_rebuild_success) {
 
   char cmd[256];
   snprintf(cmd, sizeof(cmd), "%s", bin);
-  Kit_Result r = kit_run(cmd);
+  Kit_Run_Result r = kit_run(cmd);
   ASSERT_EQ(r.exit_code, 42);
 
   unlink(src);
@@ -848,7 +848,7 @@ TEST(kit_rebuild_up_to_date) {
 
   char cmd[256];
   snprintf(cmd, sizeof(cmd), "cc -o %s %s", bin, src);
-  Kit_Result r = kit_run(cmd);
+  Kit_Run_Result r = kit_run(cmd);
   ASSERT_EQ(r.status, KIT_OK);
 
   ASSERT_TRUE(kit_rebuild(src, bin, "cc -o %s %s"));

@@ -6,21 +6,6 @@
 #include <stddef.h>
 
 typedef enum {
-  KIT_OK = 0,
-  KIT_ERR_SPAWN,
-  KIT_ERR_WAIT,
-  KIT_ERR_SIGNAL,
-  KIT_ERR_ARGS,
-  KIT_ERR_BUF,
-} Kit_Status;
-
-typedef struct {
-  Kit_Status status;
-  int exit_code;
-  int signal_no;
-} Kit_Result;
-
-typedef enum {
   KIT_LOG_DEBUG = 0,
   KIT_LOG_INFO,
   KIT_LOG_WARN,
@@ -40,10 +25,25 @@ void kit_log_set_level(Kit_Log_Level level);
 void kit_log_set_sink(Kit_Log_Sink sink, const char *file_path);
 void kit_log_set_custom(Kit_Log_Fn fn, void *ctx);
 
-Kit_Result kit_run(const char *cmd);
-Kit_Result kit_run_capture(const char *cmd, char *buf, size_t len);
-Kit_Result kit_run_argv(const char *const argv[]);
-const char *kit_strerror(Kit_Status s);
+typedef enum {
+  KIT_OK = 0,
+  KIT_ERR_SPAWN,
+  KIT_ERR_WAIT,
+  KIT_ERR_SIGNAL,
+  KIT_ERR_ARGS,
+  KIT_ERR_BUF,
+} Kit_Run_Status;
+
+typedef struct {
+  Kit_Run_Status status;
+  int exit_code;
+  int signal_no;
+} Kit_Run_Result;
+
+Kit_Run_Result kit_run(const char *cmd);
+Kit_Run_Result kit_run_capture(const char *cmd, char *buf, size_t len);
+Kit_Run_Result kit_run_argv(const char *const argv[]);
+const char *kit_strerror(Kit_Run_Status s);
 
 typedef struct {
   const char *data;
@@ -58,11 +58,11 @@ typedef struct {
 static inline Kit_Str kit_str_from(const char *s);
 static inline Kit_Str kit_str_buf(const char *s, size_t len);
 
-static inline int kit_str_empty(Kit_Str str);
-static inline int kit_str_eq(Kit_Str a, Kit_Str b);
-static inline int kit_str_eq_cstr(Kit_Str a, const char *b);
-static inline int kit_str_starts_with(Kit_Str str, Kit_Str prefix);
-static inline int kit_str_ends_with(Kit_Str str, Kit_Str suffix);
+static inline bool kit_str_empty(Kit_Str str);
+static inline bool kit_str_eq(Kit_Str a, Kit_Str b);
+static inline bool kit_str_eq_cstr(Kit_Str a, const char *b);
+static inline bool kit_str_starts_with(Kit_Str str, Kit_Str prefix);
+static inline bool kit_str_ends_with(Kit_Str str, Kit_Str suffix);
 static inline size_t kit_str_find(Kit_Str str, char c);
 static inline size_t kit_str_rfind(Kit_Str str, char c);
 
@@ -72,7 +72,7 @@ static inline Kit_Str kit_str_trim_left(Kit_Str str);
 static inline Kit_Str kit_str_trim_right(Kit_Str str);
 static inline Kit_Str kit_str_trim(Kit_Str str);
 
-static inline int kit_str_split(Kit_Str *str, char delim, Kit_Str *out);
+static inline bool kit_str_split(Kit_Str *str, char delim, Kit_Str *out);
 
 #define Kit_Arr(T) struct { T *data; size_t len; size_t cap; }
 
@@ -130,24 +130,24 @@ static inline Kit_Str kit_str_buf(const char *s, size_t len) {
   return (Kit_Str){.data = s, .len = len};
 }
 
-static inline int kit_str_empty(Kit_Str str) {
+static inline bool kit_str_empty(Kit_Str str) {
   return str.len == 0;
 }
 
-static inline int kit_str_eq(Kit_Str a, Kit_Str b) {
+static inline bool kit_str_eq(Kit_Str a, Kit_Str b) {
   return a.len == b.len && (a.data == b.data || memcmp(a.data, b.data, a.len) == 0);
 }
 
-static inline int kit_str_eq_cstr(Kit_Str a, const char *b) {
+static inline bool kit_str_eq_cstr(Kit_Str a, const char *b) {
   size_t b_len = b ? strlen(b) : 0;
   return a.len == b_len && memcmp(a.data, b, a.len) == 0;
 }
 
-static inline int kit_str_starts_with(Kit_Str str, Kit_Str prefix) {
+static inline bool kit_str_starts_with(Kit_Str str, Kit_Str prefix) {
   return str.len >= prefix.len && memcmp(str.data, prefix.data, prefix.len) == 0;
 }
 
-static inline int kit_str_ends_with(Kit_Str str, Kit_Str suffix) {
+static inline bool kit_str_ends_with(Kit_Str str, Kit_Str suffix) {
   return str.len >= suffix.len && memcmp(str.data + str.len - suffix.len, suffix.data, suffix.len) == 0;
 }
 
@@ -188,7 +188,7 @@ static inline Kit_Str kit_str_trim(Kit_Str str) {
   return kit_str_trim_right(kit_str_trim_left(str));
 }
 
-static inline int kit_str_split(Kit_Str *str, char delim, Kit_Str *out) {
+static inline bool kit_str_split(Kit_Str *str, char delim, Kit_Str *out) {
   if (!str || str->len == 0) return 0;
   size_t pos = kit_str_find(*str, delim);
   *out = kit_str_slice(*str, 0, pos);
@@ -245,7 +245,7 @@ static void kit__log(Kit_Log_Level level, const char *fmt, ...) {
     return;
   }
 
-  int to_file = kit__log_state.sink == KIT_LOG_FILE && kit__log_state.file;
+  bool to_file = kit__log_state.sink == KIT_LOG_FILE && kit__log_state.file;
   FILE *dest = to_file ? kit__log_state.file : stderr;
 
   if (to_file) {
@@ -291,7 +291,7 @@ void kit_log_set_custom(Kit_Log_Fn fn, void *ctx) {
   kit__log_state.custom_ctx = ctx;
 }
 
-const char *kit_strerror(Kit_Status s) {
+const char *kit_strerror(Kit_Run_Status s) {
   switch (s) {
   case KIT_OK:         return "success";
   case KIT_ERR_SPAWN:  return "failed to spawn child process";
@@ -303,8 +303,8 @@ const char *kit_strerror(Kit_Status s) {
   }
 }
 
-static Kit_Result kit__result(Kit_Status status, int exit_code, int sig, const char *label) {
-  Kit_Result r = {.status = status, .exit_code = exit_code, .signal_no = sig};
+static Kit_Run_Result kit__run_result(Kit_Run_Status status, int exit_code, int sig, const char *label) {
+  Kit_Run_Result r = {.status = status, .exit_code = exit_code, .signal_no = sig};
   switch (status) {
   case KIT_OK:
     kit__log(KIT_LOG_INFO, "exited 0: %s", label);
@@ -320,8 +320,8 @@ static Kit_Result kit__result(Kit_Status status, int exit_code, int sig, const c
   return r;
 }
 
-Kit_Result kit_run(const char *cmd) {
-  Kit_Result r = {.status = KIT_ERR_ARGS};
+Kit_Run_Result kit_run(const char *cmd) {
+  Kit_Run_Result r = {.status = KIT_ERR_ARGS};
 
   if (!cmd || cmd[0] == '\0') {
     kit__log(KIT_LOG_ERROR, "kit_run: cmd is NULL or empty");
@@ -345,11 +345,11 @@ Kit_Result kit_run(const char *cmd) {
   }
 
   r.exit_code = WEXITSTATUS(raw);
-  return kit__result(r.exit_code == 0 ? KIT_OK : KIT_ERR_SPAWN, r.exit_code, 0, cmd);
+  return kit__run_result(r.exit_code == 0 ? KIT_OK : KIT_ERR_SPAWN, r.exit_code, 0, cmd);
 }
 
-Kit_Result kit_run_capture(const char *cmd, char *buf, size_t len) {
-  Kit_Result r = {.status = KIT_ERR_ARGS};
+Kit_Run_Result kit_run_capture(const char *cmd, char *buf, size_t len) {
+  Kit_Run_Result r = {.status = KIT_ERR_ARGS};
 
   if (!cmd || cmd[0] == '\0') {
     kit__log(KIT_LOG_ERROR, "kit_run_capture: cmd is NULL or empty");
@@ -378,7 +378,7 @@ Kit_Result kit_run_capture(const char *cmd, char *buf, size_t len) {
   }
   buf[total] = '\0';
 
-  int truncated = total == len - 1 && !feof(fp);
+  bool truncated = total == len - 1 && !feof(fp);
   if (truncated) {
     char drain[256];
     while (fread(drain, 1, sizeof(drain), fp) > 0);
@@ -407,11 +407,11 @@ Kit_Result kit_run_capture(const char *cmd, char *buf, size_t len) {
     return r;
   }
 
-  return kit__result(r.exit_code == 0 ? KIT_OK : KIT_ERR_SPAWN, r.exit_code, 0, cmd);
+  return kit__run_result(r.exit_code == 0 ? KIT_OK : KIT_ERR_SPAWN, r.exit_code, 0, cmd);
 }
 
-Kit_Result kit_run_argv(const char *const argv[]) {
-  Kit_Result r = {.status = KIT_ERR_ARGS};
+Kit_Run_Result kit_run_argv(const char *const argv[]) {
+  Kit_Run_Result r = {.status = KIT_ERR_ARGS};
 
   if (!argv || !argv[0] || argv[0][0] == '\0') {
     kit__log(KIT_LOG_ERROR, "kit_run_argv: argv is NULL or argv[0] is empty");
@@ -461,7 +461,7 @@ Kit_Result kit_run_argv(const char *const argv[]) {
   }
 
   r.exit_code = WEXITSTATUS(status);
-  return kit__result(r.exit_code == 0 ? KIT_OK : KIT_ERR_SPAWN, r.exit_code, 0, label);
+  return kit__run_result(r.exit_code == 0 ? KIT_OK : KIT_ERR_SPAWN, r.exit_code, 0, label);
 }
 
 bool kit_needs_rebuild(const char *source, const char *binary, bool *out_needs_rebuild) {
@@ -507,7 +507,7 @@ bool kit_rebuild(const char *source, const char *binary, const char *cc_template
     return false;
   }
 
-  Kit_Result r = kit_run(cmd);
+  Kit_Run_Result r = kit_run(cmd);
   if (r.status != KIT_OK) {
     kit__log(KIT_LOG_ERROR, "kit_rebuild: compilation failed");
     return false;
