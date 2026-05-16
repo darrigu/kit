@@ -417,7 +417,11 @@ static inline bool kit_str_split(Kit_Str *str, char delim, Kit_Str *out) {
 }
 
 void *kit__arr_grow(void *data, size_t *cap, size_t item_size) {
-  size_t new_cap = *cap == 0 ? 8 : *cap*2;
+  size_t new_cap = *cap == 0 ? 8 : *cap * 2;
+  if (new_cap > SIZE_MAX/item_size) {
+    fprintf(stderr, "[kit] allocation too large\n");
+    exit(1);
+  }
   void *new_data = realloc(data, new_cap*item_size);
   if (!new_data) {
     fprintf(stderr, "[kit] out of memory in kit__arr_grow\n");
@@ -723,10 +727,15 @@ Kit_Run_Result kit_run_argv(const char *const argv[]) {
   }
 
   char label[256] = {0};
-  for (int i = 0; argv[i]; i++) {
-    if (i) strncat(label, " ", sizeof(label) - strlen(label) - 1);
-    strncat(label, argv[i], sizeof(label) - strlen(label) - 1);
+  size_t pos = 0;
+  for (int i = 0; argv[i] && pos < sizeof(label) - 1; i++) {
+    if (i && pos < sizeof(label) - 1) label[pos++] = ' ';
+    size_t len = strlen(argv[i]);
+    size_t copy_len = (pos + len < sizeof(label) - 1) ? len : sizeof(label) - 1 - pos;
+    memcpy(label + pos, argv[i], copy_len);
+    pos += copy_len;
   }
+  label[pos] = '\0';
 
   kit__log(KIT_LOG_INFO, "kit_run_argv: %s", label);
   kit__log(KIT_LOG_DEBUG, "kit_run_argv: calling fork()");
