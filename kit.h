@@ -25,26 +25,6 @@ void kit_log_set_level(Kit_Log_Level level);
 void kit_log_set_sink(Kit_Log_Sink sink, const char *file_path);
 void kit_log_set_custom(Kit_Log_Fn fn, void *ctx);
 
-typedef enum {
-  KIT_OK = 0,
-  KIT_ERR_SPAWN,
-  KIT_ERR_WAIT,
-  KIT_ERR_SIGNAL,
-  KIT_ERR_ARGS,
-  KIT_ERR_BUF,
-} Kit_Run_Status;
-
-typedef struct {
-  Kit_Run_Status status;
-  int exit_code;
-  int signal_no;
-} Kit_Run_Result;
-
-Kit_Run_Result kit_run(const char *cmd);
-Kit_Run_Result kit_run_capture(const char *cmd, char *buf, size_t len);
-Kit_Run_Result kit_run_argv(const char *const argv[]);
-const char *kit_strerror(Kit_Run_Status s);
-
 typedef struct {
   const char *data;
   size_t len;
@@ -105,6 +85,26 @@ void *kit__arr_grow(void *data, size_t *cap, size_t item_size);
     (arr)->cap = 0;                                                            \
   } while (0)
 
+typedef enum {
+  KIT_OK = 0,
+  KIT_ERR_SPAWN,
+  KIT_ERR_WAIT,
+  KIT_ERR_SIGNAL,
+  KIT_ERR_ARGS,
+  KIT_ERR_BUF,
+} Kit_Run_Status;
+
+typedef struct {
+  Kit_Run_Status status;
+  int exit_code;
+  int signal_no;
+} Kit_Run_Result;
+
+Kit_Run_Result kit_run(const char *cmd);
+Kit_Run_Result kit_run_capture(const char *cmd, char *buf, size_t len);
+Kit_Run_Result kit_run_argv(const char *const argv[]);
+const char *kit_strerror(Kit_Run_Status s);
+
 bool kit_needs_rebuild(const char *source, const char *binary, bool *out_needs_rebuild);
 bool kit_rebuild(const char *source, const char *binary, const char *cc_template);
 bool kit_auto_rebuild(int argc, char **argv, const char *source_file, const char *cc_template);
@@ -121,6 +121,89 @@ bool kit_auto_rebuild(int argc, char **argv, const char *source_file, const char
 #include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
+
+typedef struct {
+  Kit_Log_Level level;
+  Kit_Log_Sink sink;
+  FILE *file;
+  Kit_Log_Fn custom_fn;
+  void *custom_ctx;
+} Kit__Logger;
+
+static Kit__Logger kit__log_state = {
+  .level = KIT_LOG_INFO,
+  .sink = KIT_LOG_STDERR,
+};
+
+static const char *kit__level_str(Kit_Log_Level l) {
+  switch (l) {
+  case KIT_LOG_DEBUG: return "DEBUG";
+  case KIT_LOG_INFO:  return "INFO";
+  case KIT_LOG_WARN:  return "WARN";
+  case KIT_LOG_ERROR: return "ERROR";
+  default:            return "?";
+  }
+}
+
+static void kit__log(Kit_Log_Level level, const char *fmt, ...) {
+  if (level < kit__log_state.level || kit__log_state.level == KIT_LOG_NONE) return;
+
+  char msg[1024];
+  va_list ap;
+  va_start(ap, fmt);
+  vsnprintf(msg, sizeof(msg), fmt, ap);
+  va_end(ap);
+
+  if (kit__log_state.sink == KIT_LOG_CUSTOM && kit__log_state.custom_fn) {
+    kit__log_state.custom_fn(kit__log_state.custom_ctx, level, msg);
+    return;
+  }
+
+  bool to_file = kit__log_state.sink == KIT_LOG_FILE && kit__log_state.file;
+  FILE *dest = to_file ? kit__log_state.file : stderr;
+
+  if (to_file) {
+    char ts[32];
+    time_t now = time(NULL);
+    strftime(ts, sizeof(ts), "%Y-%m-%d %H:%M:%S", localtime(&now));
+    fprintf(dest, "[%s] [%s] %s\n", ts, kit__level_str(level), msg);
+  } else {
+    fprintf(dest, "[%s] %s\n", kit__level_str(level), msg);
+  }
+  fflush(dest);
+}
+
+void kit_log_set_level(Kit_Log_Level level) {
+  kit__log_state.level = level;
+}
+
+void kit_log_set_sink(Kit_Log_Sink sink, const char *file_path) {
+  if (kit__log_state.file) {
+    fclose(kit__log_state.file);
+    kit__log_state.file = NULL;
+  }
+  kit__log_state.sink = sink;
+  if (sink == KIT_LOG_FILE) {
+    if (!file_path) {
+      kit__log(KIT_LOG_WARN, "kit_log_set_sink: file_path is NULL, falling back to stderr");
+      kit__log_state.sink = KIT_LOG_STDERR;
+      return;
+    }
+    kit__log_state.file = fopen(file_path, "a");
+    if (!kit__log_state.file) {
+      kit__log_state.sink = KIT_LOG_STDERR;
+      kit__log(KIT_LOG_WARN, "kit_log_set_sink: cannot open '%s': %s — using stderr", file_path, strerror(errno));
+    } else {
+      kit__log(KIT_LOG_INFO, "logging to file: %s", file_path);
+    }
+  }
+}
+
+void kit_log_set_custom(Kit_Log_Fn fn, void *ctx) {
+  kit__log_state.sink = KIT_LOG_CUSTOM;
+  kit__log_state.custom_fn = fn;
+  kit__log_state.custom_ctx = ctx;
+}
 
 static inline Kit_Str kit_str_from(const char *s) {
   return (Kit_Str){.data = s, .len = s ? strlen(s) : 0};
@@ -206,89 +289,6 @@ void *kit__arr_grow(void *data, size_t *cap, size_t item_size) {
   }
   *cap = new_cap;
   return new_data;
-}
-
-typedef struct {
-  Kit_Log_Level level;
-  Kit_Log_Sink sink;
-  FILE *file;
-  Kit_Log_Fn custom_fn;
-  void *custom_ctx;
-} Kit__Logger;
-
-static Kit__Logger kit__log_state = {
-    .level = KIT_LOG_INFO,
-    .sink = KIT_LOG_STDERR,
-};
-
-static const char *kit__level_str(Kit_Log_Level l) {
-  switch (l) {
-  case KIT_LOG_DEBUG: return "DEBUG";
-  case KIT_LOG_INFO:  return "INFO";
-  case KIT_LOG_WARN:  return "WARN";
-  case KIT_LOG_ERROR: return "ERROR";
-  default:            return "?";
-  }
-}
-
-static void kit__log(Kit_Log_Level level, const char *fmt, ...) {
-  if (level < kit__log_state.level || kit__log_state.level == KIT_LOG_NONE) return;
-
-  char msg[1024];
-  va_list ap;
-  va_start(ap, fmt);
-  vsnprintf(msg, sizeof(msg), fmt, ap);
-  va_end(ap);
-
-  if (kit__log_state.sink == KIT_LOG_CUSTOM && kit__log_state.custom_fn) {
-    kit__log_state.custom_fn(kit__log_state.custom_ctx, level, msg);
-    return;
-  }
-
-  bool to_file = kit__log_state.sink == KIT_LOG_FILE && kit__log_state.file;
-  FILE *dest = to_file ? kit__log_state.file : stderr;
-
-  if (to_file) {
-    char ts[32];
-    time_t now = time(NULL);
-    strftime(ts, sizeof(ts), "%Y-%m-%d %H:%M:%S", localtime(&now));
-    fprintf(dest, "[%s] [%s] %s\n", ts, kit__level_str(level), msg);
-  } else {
-    fprintf(dest, "[%s] %s\n", kit__level_str(level), msg);
-  }
-  fflush(dest);
-}
-
-void kit_log_set_level(Kit_Log_Level level) {
-  kit__log_state.level = level;
-}
-
-void kit_log_set_sink(Kit_Log_Sink sink, const char *file_path) {
-  if (kit__log_state.file) {
-    fclose(kit__log_state.file);
-    kit__log_state.file = NULL;
-  }
-  kit__log_state.sink = sink;
-  if (sink == KIT_LOG_FILE) {
-    if (!file_path) {
-      kit__log(KIT_LOG_WARN, "kit_log_set_sink: file_path is NULL, falling back to stderr");
-      kit__log_state.sink = KIT_LOG_STDERR;
-      return;
-    }
-    kit__log_state.file = fopen(file_path, "a");
-    if (!kit__log_state.file) {
-      kit__log_state.sink = KIT_LOG_STDERR;
-      kit__log(KIT_LOG_WARN, "kit_log_set_sink: cannot open '%s': %s — using stderr", file_path, strerror(errno));
-    } else {
-      kit__log(KIT_LOG_INFO, "logging to file: %s", file_path);
-    }
-  }
-}
-
-void kit_log_set_custom(Kit_Log_Fn fn, void *ctx) {
-  kit__log_state.sink = KIT_LOG_CUSTOM;
-  kit__log_state.custom_fn = fn;
-  kit__log_state.custom_ctx = ctx;
 }
 
 const char *kit_strerror(Kit_Run_Status s) {

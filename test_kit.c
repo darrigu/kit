@@ -41,32 +41,117 @@ static int tests_failed = 0;
 #define ASSERT_NULL(p) ASSERT((p) == NULL)
 #define ASSERT_NONNULL(p) ASSERT((p) != NULL)
 
-TEST(kit_str_from_null) {
+static int log_capture_count = 0;
+static char log_capture_msg[1024];
+static Kit_Log_Level log_capture_level;
+
+static void test_log_handler(void *ctx, Kit_Log_Level level, const char *msg) {
+  (void)ctx;
+  log_capture_count++;
+  log_capture_level = level;
+  strncpy(log_capture_msg, msg, sizeof(log_capture_msg) - 1);
+  log_capture_msg[sizeof(log_capture_msg) - 1] = '\0';
+}
+
+TEST(log_set_level) {
+  kit_log_set_level(KIT_LOG_DEBUG);
+}
+
+TEST(log_custom_handler) {
+  log_capture_count = 0;
+
+  kit_log_set_custom(test_log_handler, NULL);
+  kit_log_set_level(KIT_LOG_DEBUG);
+
+  kit__log(KIT_LOG_DEBUG, "test message %d", 42);
+
+  ASSERT_EQ(log_capture_count, 1);
+  ASSERT_EQ(log_capture_level, KIT_LOG_DEBUG);
+  ASSERT(strstr(log_capture_msg, "test message") != NULL);
+
+  kit_log_set_sink(KIT_LOG_STDERR, NULL);
+}
+
+TEST(log_file_sink) {
+  const char *test_log = "/tmp/kit_test.log";
+  unlink(test_log);
+
+  kit_log_set_sink(KIT_LOG_FILE, test_log);
+  kit_log_set_level(KIT_LOG_INFO);
+
+  kit__log(KIT_LOG_INFO, "file test message");
+
+  kit_log_set_sink(KIT_LOG_STDERR, NULL);
+
+  FILE *f = fopen(test_log, "r");
+  ASSERT_NONNULL(f);
+
+  char buf[256];
+  bool found = false;
+  while (fgets(buf, sizeof(buf), f)) {
+    if (strstr(buf, "file test message")) {
+      found = true;
+      break;
+    }
+  }
+  fclose(f);
+  unlink(test_log);
+
+  ASSERT_TRUE(found);
+}
+
+TEST(log_level_filtering) {
+  log_capture_count = 0;
+  kit_log_set_custom(test_log_handler, NULL);
+
+  kit_log_set_level(KIT_LOG_WARN);
+
+  kit__log(KIT_LOG_DEBUG, "debug msg");
+  kit__log(KIT_LOG_INFO, "info msg");
+  kit__log(KIT_LOG_WARN, "warn msg");
+  kit__log(KIT_LOG_ERROR, "error msg");
+
+  ASSERT_EQ(log_capture_count, 2);
+
+  log_capture_count = 0;
+  kit_log_set_level(KIT_LOG_NONE);
+  kit__log(KIT_LOG_ERROR, "should not appear");
+  ASSERT_EQ(log_capture_count, 0);
+
+  kit_log_set_sink(KIT_LOG_STDERR, NULL);
+}
+
+TEST(log_null_file_path) {
+  kit_log_set_sink(KIT_LOG_FILE, NULL);
+  kit_log_set_sink(KIT_LOG_STDERR, NULL);
+}
+
+TEST(str_from_null) {
   Kit_Str str = kit_str_from(NULL);
   ASSERT_EQ(str.len, 0);
   ASSERT_NULL(str.data);
 }
 
-TEST(kit_str_from_string) {
+TEST(str_from_string) {
   Kit_Str str = kit_str_from("hello");
   ASSERT_EQ(str.len, 5);
   ASSERT_STREQ(str.data, "hello");
 }
 
-TEST(kit_str_buf) {
+TEST(str_buf) {
   Kit_Str str = kit_str_buf("world", 3);
   ASSERT_EQ(str.len, 3);
   ASSERT_STREQ(str.data, "world");
 }
 
-TEST(kit_str_empty) {
+TEST(str_empty) {
   ASSERT_TRUE(kit_str_empty(kit_str_from("")));
   ASSERT_TRUE(kit_str_empty(kit_str_from(NULL)));
   ASSERT_FALSE(kit_str_empty(kit_str_from("x")));
   ASSERT_FALSE(kit_str_empty(kit_str_from("abc")));
 }
 
-TEST(kit_str_eq) {
+TEST(str_eq) {
   Kit_Str a = kit_str_from("hello");
   Kit_Str b = kit_str_from("hello");
   Kit_Str c = kit_str_from("world");
@@ -85,7 +170,7 @@ TEST(kit_str_eq) {
   ASSERT_TRUE(kit_str_eq(kit_str_from(""), kit_str_from(NULL)));
 }
 
-TEST(kit_str_eq_cstr) {
+TEST(str_eq_cstr) {
   Kit_Str str = kit_str_from("test");
 
   ASSERT_TRUE(kit_str_eq_cstr(str, "test"));
@@ -98,7 +183,7 @@ TEST(kit_str_eq_cstr) {
   ASSERT_TRUE(kit_str_eq_cstr(kit_str_from(""), NULL));
 }
 
-TEST(kit_str_starts_with) {
+TEST(str_starts_with) {
   Kit_Str str = kit_str_from("hello world");
 
   ASSERT_TRUE(kit_str_starts_with(str, kit_str_from("hello")));
@@ -113,7 +198,7 @@ TEST(kit_str_starts_with) {
   ASSERT_TRUE(kit_str_starts_with(kit_str_from("abc"), kit_str_from("")));
 }
 
-TEST(kit_str_ends_with) {
+TEST(str_ends_with) {
   Kit_Str str = kit_str_from("hello world");
 
   ASSERT_TRUE(kit_str_ends_with(str, kit_str_from("world")));
@@ -128,7 +213,7 @@ TEST(kit_str_ends_with) {
   ASSERT_TRUE(kit_str_ends_with(kit_str_from("abc"), kit_str_from("")));
 }
 
-TEST(kit_str_find) {
+TEST(str_find) {
   Kit_Str str = kit_str_from("hello world");
 
   ASSERT_EQ(kit_str_find(str, 'h'), 0);
@@ -147,7 +232,7 @@ TEST(kit_str_find) {
   ASSERT_EQ(kit_str_find(str2, 'a'), 0);
 }
 
-TEST(kit_str_rfind) {
+TEST(str_rfind) {
   Kit_Str str = kit_str_from("hello world");
 
   ASSERT_EQ(kit_str_rfind(str, 'h'), 0);
@@ -166,7 +251,7 @@ TEST(kit_str_rfind) {
   ASSERT_EQ(kit_str_rfind(str2, 'a'), 2);
 }
 
-TEST(kit_str_slice) {
+TEST(str_slice) {
   Kit_Str str = kit_str_from("hello world");
 
   Kit_Str s1 = kit_str_slice(str, 0, 5);
@@ -195,7 +280,7 @@ TEST(kit_str_slice) {
   ASSERT_EQ(s8.len, 0);
 }
 
-TEST(kit_str_trim_left) {
+TEST(str_trim_left) {
   ASSERT_TRUE(kit_str_eq_cstr(kit_str_trim_left(kit_str_from("  hello")), "hello"));
   ASSERT_TRUE(kit_str_eq_cstr(kit_str_trim_left(kit_str_from("\t\nhello")), "hello"));
   ASSERT_TRUE(kit_str_eq_cstr(kit_str_trim_left(kit_str_from(" \t\n hello")), "hello"));
@@ -205,7 +290,7 @@ TEST(kit_str_trim_left) {
   ASSERT_TRUE(kit_str_eq_cstr(kit_str_trim_left(kit_str_from("\t\n\r ")), ""));
 }
 
-TEST(kit_str_trim_right) {
+TEST(str_trim_right) {
   ASSERT_TRUE(kit_str_eq_cstr(kit_str_trim_right(kit_str_from("hello  ")), "hello"));
   ASSERT_TRUE(kit_str_eq_cstr(kit_str_trim_right(kit_str_from("hello\t\n")), "hello"));
   ASSERT_TRUE(kit_str_eq_cstr(kit_str_trim_right(kit_str_from("hello \t\n\r")), "hello"));
@@ -215,7 +300,7 @@ TEST(kit_str_trim_right) {
   ASSERT_TRUE(kit_str_eq_cstr(kit_str_trim_right(kit_str_from("\t\n\r ")), ""));
 }
 
-TEST(kit_str_trim) {
+TEST(str_trim) {
   ASSERT_TRUE(kit_str_eq_cstr(kit_str_trim(kit_str_from("  hello  ")), "hello"));
   ASSERT_TRUE(kit_str_eq_cstr(kit_str_trim(kit_str_from("\t\nhello\t\n")), "hello"));
   ASSERT_TRUE(kit_str_eq_cstr(kit_str_trim(kit_str_from("  h e l l o  ")), "h e l l o"));
@@ -225,7 +310,7 @@ TEST(kit_str_trim) {
   ASSERT_TRUE(kit_str_eq_cstr(kit_str_trim(kit_str_from(" \t\n\r ")), ""));
 }
 
-TEST(kit_str_split) {
+TEST(str_split) {
   Kit_Str str = kit_str_from("hello,world,test");
   Kit_Str part = {0};
 
@@ -258,7 +343,7 @@ TEST(kit_str_split) {
   ASSERT_TRUE(kit_str_empty(str4));
 }
 
-TEST(kit_str_macro) {
+TEST(str_macro) {
   Kit_Str str = KIT_STR("hello");
   ASSERT_EQ(str.len, 5);
   ASSERT_STREQ(str.data, "hello");
@@ -267,7 +352,7 @@ TEST(kit_str_macro) {
   ASSERT_EQ(str2.len, 0);
 }
 
-TEST(kit_arr_basic) {
+TEST(arr_basic) {
   Kit_Arr(int) arr = {0};
 
   ASSERT_EQ(arr.len, 0);
@@ -291,7 +376,7 @@ TEST(kit_arr_basic) {
   ASSERT_EQ(arr.cap, 0);
 }
 
-TEST(kit_arr_push_multiple) {
+TEST(arr_push_multiple) {
   Kit_Arr(int) arr = {0};
 
   for (int i = 0; i < 100; i++) {
@@ -308,7 +393,7 @@ TEST(kit_arr_push_multiple) {
   kit_arr_free(&arr);
 }
 
-TEST(kit_arr_pop) {
+TEST(arr_pop) {
   Kit_Arr(int) arr = {0};
 
   kit_arr_push(&arr, 10);
@@ -327,7 +412,7 @@ TEST(kit_arr_pop) {
   kit_arr_free(&arr);
 }
 
-TEST(kit_arr_get) {
+TEST(arr_get) {
   Kit_Arr(int) arr = {0};
 
   kit_arr_push(&arr, 5);
@@ -341,7 +426,7 @@ TEST(kit_arr_get) {
   kit_arr_free(&arr);
 }
 
-TEST(kit_arr_reserve) {
+TEST(arr_reserve) {
   Kit_Arr(int) arr = {0};
 
   kit_arr_reserve(&arr, 50);
@@ -356,7 +441,7 @@ TEST(kit_arr_reserve) {
   kit_arr_free(&arr);
 }
 
-TEST(kit_arr_strings) {
+TEST(arr_strings) {
   Kit_Arr(char *) arr = {0};
 
   kit_arr_push(&arr, strdup("hello"));
@@ -374,7 +459,7 @@ TEST(kit_arr_strings) {
   kit_arr_free(&arr);
 }
 
-TEST(kit_arr_struct) {
+TEST(arr_struct) {
   typedef struct {
     int x;
     int y;
@@ -396,92 +481,7 @@ TEST(kit_arr_struct) {
   kit_arr_free(&arr);
 }
 
-static int log_capture_count = 0;
-static char log_capture_msg[1024];
-static Kit_Log_Level log_capture_level;
-
-static void test_log_handler(void *ctx, Kit_Log_Level level, const char *msg) {
-  (void)ctx;
-  log_capture_count++;
-  log_capture_level = level;
-  strncpy(log_capture_msg, msg, sizeof(log_capture_msg) - 1);
-  log_capture_msg[sizeof(log_capture_msg) - 1] = '\0';
-}
-
-TEST(kit_log_set_level) {
-  kit_log_set_level(KIT_LOG_DEBUG);
-}
-
-TEST(kit_log_custom_handler) {
-  log_capture_count = 0;
-
-  kit_log_set_custom(test_log_handler, NULL);
-  kit_log_set_level(KIT_LOG_DEBUG);
-
-  kit__log(KIT_LOG_DEBUG, "test message %d", 42);
-
-  ASSERT_EQ(log_capture_count, 1);
-  ASSERT_EQ(log_capture_level, KIT_LOG_DEBUG);
-  ASSERT(strstr(log_capture_msg, "test message") != NULL);
-
-  kit_log_set_sink(KIT_LOG_STDERR, NULL);
-}
-
-TEST(kit_log_file_sink) {
-  const char *test_log = "/tmp/kit_test.log";
-  unlink(test_log);
-
-  kit_log_set_sink(KIT_LOG_FILE, test_log);
-  kit_log_set_level(KIT_LOG_INFO);
-
-  kit__log(KIT_LOG_INFO, "file test message");
-
-  kit_log_set_sink(KIT_LOG_STDERR, NULL);
-
-  FILE *f = fopen(test_log, "r");
-  ASSERT_NONNULL(f);
-
-  char buf[256];
-  bool found = false;
-  while (fgets(buf, sizeof(buf), f)) {
-    if (strstr(buf, "file test message")) {
-      found = true;
-      break;
-    }
-  }
-  fclose(f);
-  unlink(test_log);
-
-  ASSERT_TRUE(found);
-}
-
-TEST(kit_log_level_filtering) {
-  log_capture_count = 0;
-  kit_log_set_custom(test_log_handler, NULL);
-
-  kit_log_set_level(KIT_LOG_WARN);
-
-  kit__log(KIT_LOG_DEBUG, "debug msg");
-  kit__log(KIT_LOG_INFO, "info msg");
-  kit__log(KIT_LOG_WARN, "warn msg");
-  kit__log(KIT_LOG_ERROR, "error msg");
-
-  ASSERT_EQ(log_capture_count, 2);
-
-  log_capture_count = 0;
-  kit_log_set_level(KIT_LOG_NONE);
-  kit__log(KIT_LOG_ERROR, "should not appear");
-  ASSERT_EQ(log_capture_count, 0);
-
-  kit_log_set_sink(KIT_LOG_STDERR, NULL);
-}
-
-TEST(kit_log_null_file_path) {
-  kit_log_set_sink(KIT_LOG_FILE, NULL);
-  kit_log_set_sink(KIT_LOG_STDERR, NULL);
-}
-
-TEST(kit_run_null_cmd) {
+TEST(run_null_cmd) {
   Kit_Run_Result r = kit_run(NULL);
   ASSERT_EQ(r.status, KIT_ERR_ARGS);
 
@@ -489,24 +489,24 @@ TEST(kit_run_null_cmd) {
   ASSERT_EQ(r.status, KIT_ERR_ARGS);
 }
 
-TEST(kit_run_success) {
+TEST(run_success) {
   Kit_Run_Result r = kit_run("echo hello");
   ASSERT_EQ(r.status, KIT_OK);
   ASSERT_EQ(r.exit_code, 0);
 }
 
-TEST(kit_run_failure) {
+TEST(run_failure) {
   Kit_Run_Result r = kit_run("false");
   ASSERT_EQ(r.status, KIT_ERR_SPAWN);
   ASSERT_EQ(r.exit_code, 1);
 }
 
-TEST(kit_run_nonexistent) {
+TEST(run_nonexistent) {
   Kit_Run_Result r = kit_run("/nonexistent/path/to/command");
   ASSERT_EQ(r.status, KIT_ERR_SPAWN);
 }
 
-TEST(kit_run_capture_null_cmd) {
+TEST(run_capture_null_cmd) {
   char buf[64];
   Kit_Run_Result r = kit_run_capture(NULL, buf, sizeof(buf));
   ASSERT_EQ(r.status, KIT_ERR_ARGS);
@@ -515,7 +515,7 @@ TEST(kit_run_capture_null_cmd) {
   ASSERT_EQ(r.status, KIT_ERR_ARGS);
 }
 
-TEST(kit_run_capture_null_buf) {
+TEST(run_capture_null_buf) {
   Kit_Run_Result r = kit_run_capture("echo test", NULL, 0);
   ASSERT_EQ(r.status, KIT_ERR_ARGS);
 
@@ -523,7 +523,7 @@ TEST(kit_run_capture_null_buf) {
   ASSERT_EQ(r2.status, KIT_ERR_ARGS);
 }
 
-TEST(kit_run_capture_success) {
+TEST(run_capture_success) {
   char buf[256] = {0};
   Kit_Run_Result r = kit_run_capture("echo hello world", buf, sizeof(buf));
 
@@ -532,7 +532,7 @@ TEST(kit_run_capture_success) {
   ASSERT(strstr(buf, "hello world") != NULL);
 }
 
-TEST(kit_run_capture_truncated) {
+TEST(run_capture_truncated) {
   char buf[4] = {0};
   Kit_Run_Result r = kit_run_capture("echo hello", buf, sizeof(buf));
 
@@ -540,7 +540,7 @@ TEST(kit_run_capture_truncated) {
   ASSERT(buf[0] != '\0');
 }
 
-TEST(kit_run_capture_large_output) {
+TEST(run_capture_large_output) {
   char buf[4096];
   memset(buf, 0, sizeof(buf));
 
@@ -549,7 +549,7 @@ TEST(kit_run_capture_large_output) {
   ASSERT(r.status == KIT_OK || r.status == KIT_ERR_BUF);
 }
 
-TEST(kit_run_argv_null) {
+TEST(run_argv_null) {
   Kit_Run_Result r = kit_run_argv(NULL);
   ASSERT_EQ(r.status, KIT_ERR_ARGS);
 
@@ -562,7 +562,7 @@ TEST(kit_run_argv_null) {
   ASSERT_EQ(r.status, KIT_ERR_ARGS);
 }
 
-TEST(kit_run_argv_success) {
+TEST(run_argv_success) {
   const char *argv[] = {"echo", "test", NULL};
   Kit_Run_Result r = kit_run_argv(argv);
 
@@ -570,7 +570,7 @@ TEST(kit_run_argv_success) {
   ASSERT_EQ(r.exit_code, 0);
 }
 
-TEST(kit_run_argv_failure) {
+TEST(run_argv_failure) {
   const char *argv[] = {"false", NULL};
   Kit_Run_Result r = kit_run_argv(argv);
 
@@ -578,19 +578,165 @@ TEST(kit_run_argv_failure) {
   ASSERT_EQ(r.exit_code, 1);
 }
 
-TEST(kit_run_argv_nonexistent) {
+TEST(run_argv_nonexistent) {
   const char *argv[] = {"/nonexistent/command", NULL};
   Kit_Run_Result r = kit_run_argv(argv);
 
   ASSERT_EQ(r.status, KIT_ERR_SPAWN);
 }
 
-TEST(kit_run_argv_multicmd) {
+TEST(run_argv_multicmd) {
   const char *argv[] = {"sh", "-c", "echo hello && exit 0", NULL};
   Kit_Run_Result r = kit_run_argv(argv);
 
   ASSERT_EQ(r.status, KIT_OK);
   ASSERT_EQ(r.exit_code, 0);
+}
+
+TEST(needs_rebuild_null_args) {
+  bool result;
+  ASSERT_FALSE(kit_needs_rebuild(NULL, "binary", &result));
+  ASSERT_FALSE(kit_needs_rebuild("source", NULL, &result));
+  ASSERT_FALSE(kit_needs_rebuild("source", "binary", NULL));
+  ASSERT_FALSE(kit_needs_rebuild(NULL, NULL, NULL));
+}
+
+TEST(needs_rebuild_missing_source) {
+  bool result;
+  ASSERT_FALSE(kit_needs_rebuild("/nonexistent/source.c", "/tmp/fake_binary", &result));
+}
+
+TEST(needs_rebuild_missing_binary) {
+  bool result;
+  ASSERT_TRUE(kit_needs_rebuild(__FILE__, "/tmp/nonexistent_binary_12345", &result));
+  ASSERT_TRUE(result);
+}
+
+TEST(needs_rebuild_up_to_date) {
+  bool result;
+  const char *src = "/tmp/kit_test_rebuild_src.c";
+  const char *bin = "/tmp/kit_test_rebuild_bin";
+
+  FILE *f = fopen(src, "w");
+  ASSERT_NONNULL(f);
+  fprintf(f, "int main(void) { return 0; }\n");
+  fclose(f);
+
+  char cmd[256];
+  snprintf(cmd, sizeof(cmd), "cc -o %s %s", bin, src);
+  Kit_Run_Result r = kit_run(cmd);
+  ASSERT_EQ(r.status, KIT_OK);
+
+  ASSERT_TRUE(kit_needs_rebuild(src, bin, &result));
+  ASSERT_FALSE(result);
+
+  unlink(src);
+  unlink(bin);
+}
+
+TEST(needs_rebuild_source_newer) {
+  bool result;
+  const char *src = "/tmp/kit_test_rebuild_src2.c";
+  const char *bin = "/tmp/kit_test_rebuild_bin2";
+
+  FILE *f = fopen(src, "w");
+  ASSERT_NONNULL(f);
+  fprintf(f, "int main(void) { return 0; }\n");
+  fclose(f);
+
+  char cmd[256];
+  snprintf(cmd, sizeof(cmd), "cc -o %s %s", bin, src);
+  Kit_Run_Result r = kit_run(cmd);
+  ASSERT_EQ(r.status, KIT_OK);
+
+  struct timespec ts = {1, 0};
+  nanosleep(&ts, NULL);
+
+  f = fopen(src, "a");
+  ASSERT_NONNULL(f);
+  fprintf(f, "// modified\n");
+  fclose(f);
+
+  ASSERT_TRUE(kit_needs_rebuild(src, bin, &result));
+  ASSERT_TRUE(result);
+
+  unlink(src);
+  unlink(bin);
+}
+
+TEST(rebuild_null_args) {
+  ASSERT_FALSE(kit_rebuild(NULL, "binary", "cc -o %s %s"));
+  ASSERT_FALSE(kit_rebuild("source", NULL, "cc -o %s %s"));
+  ASSERT_FALSE(kit_rebuild("source", "binary", NULL));
+  ASSERT_FALSE(kit_rebuild(NULL, NULL, NULL));
+}
+
+TEST(rebuild_success) {
+  const char *src = "/tmp/kit_test_compile_src.c";
+  const char *bin = "/tmp/kit_test_compile_bin";
+
+  FILE *f = fopen(src, "w");
+  ASSERT_NONNULL(f);
+  fprintf(f, "int main(void) { return 42; }\n");
+  fclose(f);
+
+  ASSERT_TRUE(kit_rebuild(src, bin, "cc -o %s %s"));
+
+  struct stat st;
+  ASSERT_EQ(stat(bin, &st), 0);
+  ASSERT_TRUE(st.st_mode & S_IXUSR);
+
+  char cmd[256];
+  snprintf(cmd, sizeof(cmd), "%s", bin);
+  Kit_Run_Result r = kit_run(cmd);
+  ASSERT_EQ(r.exit_code, 42);
+
+  unlink(src);
+  unlink(bin);
+}
+
+TEST(rebuild_failure) {
+  const char *src = "/tmp/kit_test_bad_src.c";
+  const char *bin = "/tmp/kit_test_bad_bin";
+
+  FILE *f = fopen(src, "w");
+  ASSERT_NONNULL(f);
+  fprintf(f, "this is not valid C code !!!\n");
+  fclose(f);
+
+  ASSERT_FALSE(kit_rebuild(src, bin, "cc -o %s %s"));
+
+  unlink(src);
+  unlink(bin);
+}
+
+TEST(rebuild_up_to_date) {
+  const char *src = "/tmp/kit_test_uptodate_src.c";
+  const char *bin = "/tmp/kit_test_uptodate_bin";
+
+  FILE *f = fopen(src, "w");
+  ASSERT_NONNULL(f);
+  fprintf(f, "int main(void) { return 0; }\n");
+  fclose(f);
+
+  char cmd[256];
+  snprintf(cmd, sizeof(cmd), "cc -o %s %s", bin, src);
+  Kit_Run_Result r = kit_run(cmd);
+  ASSERT_EQ(r.status, KIT_OK);
+
+  ASSERT_TRUE(kit_rebuild(src, bin, "cc -o %s %s"));
+
+  unlink(src);
+  unlink(bin);
+}
+
+TEST(auto_rebuild_null_args) {
+  ASSERT_FALSE(kit_auto_rebuild(0, NULL, NULL, NULL));
+}
+
+TEST(auto_rebuild_missing_source) {
+  char *fake_argv[] = {"./fake_binary", NULL};
+  ASSERT_FALSE(kit_auto_rebuild(1, fake_argv, "/nonexistent/source.c", "cc -o %s %s"));
 }
 
 TEST(integration_str_and_arr) {
@@ -720,218 +866,72 @@ TEST(performance_arr_growth) {
   kit_arr_free(&arr);
 }
 
-TEST(kit_needs_rebuild_null_args) {
-  bool result;
-  ASSERT_FALSE(kit_needs_rebuild(NULL, "binary", &result));
-  ASSERT_FALSE(kit_needs_rebuild("source", NULL, &result));
-  ASSERT_FALSE(kit_needs_rebuild("source", "binary", NULL));
-  ASSERT_FALSE(kit_needs_rebuild(NULL, NULL, NULL));
-}
-
-TEST(kit_needs_rebuild_missing_source) {
-  bool result;
-  ASSERT_FALSE(kit_needs_rebuild("/nonexistent/source.c", "/tmp/fake_binary", &result));
-}
-
-TEST(kit_needs_rebuild_missing_binary) {
-  bool result;
-  ASSERT_TRUE(kit_needs_rebuild(__FILE__, "/tmp/nonexistent_binary_12345", &result));
-  ASSERT_TRUE(result);
-}
-
-TEST(kit_needs_rebuild_up_to_date) {
-  bool result;
-  const char *src = "/tmp/kit_test_rebuild_src.c";
-  const char *bin = "/tmp/kit_test_rebuild_bin";
-
-  FILE *f = fopen(src, "w");
-  ASSERT_NONNULL(f);
-  fprintf(f, "int main(void) { return 0; }\n");
-  fclose(f);
-
-  char cmd[256];
-  snprintf(cmd, sizeof(cmd), "cc -o %s %s", bin, src);
-  Kit_Run_Result r = kit_run(cmd);
-  ASSERT_EQ(r.status, KIT_OK);
-
-  ASSERT_TRUE(kit_needs_rebuild(src, bin, &result));
-  ASSERT_FALSE(result);
-
-  unlink(src);
-  unlink(bin);
-}
-
-TEST(kit_needs_rebuild_source_newer) {
-  bool result;
-  const char *src = "/tmp/kit_test_rebuild_src2.c";
-  const char *bin = "/tmp/kit_test_rebuild_bin2";
-
-  FILE *f = fopen(src, "w");
-  ASSERT_NONNULL(f);
-  fprintf(f, "int main(void) { return 0; }\n");
-  fclose(f);
-
-  char cmd[256];
-  snprintf(cmd, sizeof(cmd), "cc -o %s %s", bin, src);
-  Kit_Run_Result r = kit_run(cmd);
-  ASSERT_EQ(r.status, KIT_OK);
-
-  struct timespec ts = {1, 0};
-  nanosleep(&ts, NULL);
-
-  f = fopen(src, "a");
-  ASSERT_NONNULL(f);
-  fprintf(f, "// modified\n");
-  fclose(f);
-
-  ASSERT_TRUE(kit_needs_rebuild(src, bin, &result));
-  ASSERT_TRUE(result);
-
-  unlink(src);
-  unlink(bin);
-}
-
-TEST(kit_rebuild_null_args) {
-  ASSERT_FALSE(kit_rebuild(NULL, "binary", "cc -o %s %s"));
-  ASSERT_FALSE(kit_rebuild("source", NULL, "cc -o %s %s"));
-  ASSERT_FALSE(kit_rebuild("source", "binary", NULL));
-  ASSERT_FALSE(kit_rebuild(NULL, NULL, NULL));
-}
-
-TEST(kit_rebuild_success) {
-  const char *src = "/tmp/kit_test_compile_src.c";
-  const char *bin = "/tmp/kit_test_compile_bin";
-
-  FILE *f = fopen(src, "w");
-  ASSERT_NONNULL(f);
-  fprintf(f, "int main(void) { return 42; }\n");
-  fclose(f);
-
-  ASSERT_TRUE(kit_rebuild(src, bin, "cc -o %s %s"));
-
-  struct stat st;
-  ASSERT_EQ(stat(bin, &st), 0);
-  ASSERT_TRUE(st.st_mode & S_IXUSR);
-
-  char cmd[256];
-  snprintf(cmd, sizeof(cmd), "%s", bin);
-  Kit_Run_Result r = kit_run(cmd);
-  ASSERT_EQ(r.exit_code, 42);
-
-  unlink(src);
-  unlink(bin);
-}
-
-TEST(kit_rebuild_failure) {
-  const char *src = "/tmp/kit_test_bad_src.c";
-  const char *bin = "/tmp/kit_test_bad_bin";
-
-  FILE *f = fopen(src, "w");
-  ASSERT_NONNULL(f);
-  fprintf(f, "this is not valid C code !!!\n");
-  fclose(f);
-
-  ASSERT_FALSE(kit_rebuild(src, bin, "cc -o %s %s"));
-
-  unlink(src);
-  unlink(bin);
-}
-
-TEST(kit_rebuild_up_to_date) {
-  const char *src = "/tmp/kit_test_uptodate_src.c";
-  const char *bin = "/tmp/kit_test_uptodate_bin";
-
-  FILE *f = fopen(src, "w");
-  ASSERT_NONNULL(f);
-  fprintf(f, "int main(void) { return 0; }\n");
-  fclose(f);
-
-  char cmd[256];
-  snprintf(cmd, sizeof(cmd), "cc -o %s %s", bin, src);
-  Kit_Run_Result r = kit_run(cmd);
-  ASSERT_EQ(r.status, KIT_OK);
-
-  ASSERT_TRUE(kit_rebuild(src, bin, "cc -o %s %s"));
-
-  unlink(src);
-  unlink(bin);
-}
-
-TEST(kit_auto_rebuild_null_args) {
-  ASSERT_FALSE(kit_auto_rebuild(0, NULL, NULL, NULL));
-}
-
-TEST(kit_auto_rebuild_missing_source) {
-  char *fake_argv[] = {"./fake_binary", NULL};
-  ASSERT_FALSE(kit_auto_rebuild(1, fake_argv, "/nonexistent/source.c", "cc -o %s %s"));
-}
-
 int main(int argc, char **argv) {
   if (!kit_auto_rebuild(argc, argv, __FILE__, "cc -Wall -o %s %s"))
     return 1;
 
-  printf("Kit_Str Tests:\n");
-  RUN_TEST(kit_str_from_null);
-  RUN_TEST(kit_str_from_string);
-  RUN_TEST(kit_str_buf);
-  RUN_TEST(kit_str_empty);
-  RUN_TEST(kit_str_eq);
-  RUN_TEST(kit_str_eq_cstr);
-  RUN_TEST(kit_str_starts_with);
-  RUN_TEST(kit_str_ends_with);
-  RUN_TEST(kit_str_find);
-  RUN_TEST(kit_str_rfind);
-  RUN_TEST(kit_str_slice);
-  RUN_TEST(kit_str_trim_left);
-  RUN_TEST(kit_str_trim_right);
-  RUN_TEST(kit_str_trim);
-  RUN_TEST(kit_str_split);
-  RUN_TEST(kit_str_macro);
+  printf("Kit_Log Tests:\n");
+  RUN_TEST(log_set_level);
+  RUN_TEST(log_custom_handler);
+  RUN_TEST(log_file_sink);
+  RUN_TEST(log_level_filtering);
+  RUN_TEST(log_null_file_path);
+
+  printf("\nKit_Str Tests:\n");
+  RUN_TEST(str_from_null);
+  RUN_TEST(str_from_string);
+  RUN_TEST(str_buf);
+  RUN_TEST(str_empty);
+  RUN_TEST(str_eq);
+  RUN_TEST(str_eq_cstr);
+  RUN_TEST(str_starts_with);
+  RUN_TEST(str_ends_with);
+  RUN_TEST(str_find);
+  RUN_TEST(str_rfind);
+  RUN_TEST(str_slice);
+  RUN_TEST(str_trim_left);
+  RUN_TEST(str_trim_right);
+  RUN_TEST(str_trim);
+  RUN_TEST(str_split);
+  RUN_TEST(str_macro);
 
   printf("\nKit_Arr Tests:\n");
-  RUN_TEST(kit_arr_basic);
-  RUN_TEST(kit_arr_push_multiple);
-  RUN_TEST(kit_arr_pop);
-  RUN_TEST(kit_arr_get);
-  RUN_TEST(kit_arr_reserve);
-  RUN_TEST(kit_arr_strings);
-  RUN_TEST(kit_arr_struct);
-
-  printf("\nKit_Log Tests:\n");
-  RUN_TEST(kit_log_set_level);
-  RUN_TEST(kit_log_custom_handler);
-  RUN_TEST(kit_log_file_sink);
-  RUN_TEST(kit_log_level_filtering);
-  RUN_TEST(kit_log_null_file_path);
+  RUN_TEST(arr_basic);
+  RUN_TEST(arr_push_multiple);
+  RUN_TEST(arr_pop);
+  RUN_TEST(arr_get);
+  RUN_TEST(arr_reserve);
+  RUN_TEST(arr_strings);
+  RUN_TEST(arr_struct);
 
   printf("\nKit_Run Tests:\n");
-  RUN_TEST(kit_run_null_cmd);
-  RUN_TEST(kit_run_success);
-  RUN_TEST(kit_run_failure);
-  RUN_TEST(kit_run_nonexistent);
-  RUN_TEST(kit_run_capture_null_cmd);
-  RUN_TEST(kit_run_capture_null_buf);
-  RUN_TEST(kit_run_capture_success);
-  RUN_TEST(kit_run_capture_truncated);
-  RUN_TEST(kit_run_capture_large_output);
-  RUN_TEST(kit_run_argv_null);
-  RUN_TEST(kit_run_argv_success);
-  RUN_TEST(kit_run_argv_failure);
-  RUN_TEST(kit_run_argv_nonexistent);
-  RUN_TEST(kit_run_argv_multicmd);
+  RUN_TEST(run_null_cmd);
+  RUN_TEST(run_success);
+  RUN_TEST(run_failure);
+  RUN_TEST(run_nonexistent);
+  RUN_TEST(run_capture_null_cmd);
+  RUN_TEST(run_capture_null_buf);
+  RUN_TEST(run_capture_success);
+  RUN_TEST(run_capture_truncated);
+  RUN_TEST(run_capture_large_output);
+  RUN_TEST(run_argv_null);
+  RUN_TEST(run_argv_success);
+  RUN_TEST(run_argv_failure);
+  RUN_TEST(run_argv_nonexistent);
+  RUN_TEST(run_argv_multicmd);
 
   printf("\nKit_Rebuild Tests:\n");
-  RUN_TEST(kit_needs_rebuild_null_args);
-  RUN_TEST(kit_needs_rebuild_missing_source);
-  RUN_TEST(kit_needs_rebuild_missing_binary);
-  RUN_TEST(kit_needs_rebuild_up_to_date);
-  RUN_TEST(kit_needs_rebuild_source_newer);
-  RUN_TEST(kit_rebuild_null_args);
-  RUN_TEST(kit_rebuild_success);
-  RUN_TEST(kit_rebuild_failure);
-  RUN_TEST(kit_rebuild_up_to_date);
-  RUN_TEST(kit_auto_rebuild_null_args);
-  RUN_TEST(kit_auto_rebuild_missing_source);
+  RUN_TEST(needs_rebuild_null_args);
+  RUN_TEST(needs_rebuild_missing_source);
+  RUN_TEST(needs_rebuild_missing_binary);
+  RUN_TEST(needs_rebuild_up_to_date);
+  RUN_TEST(needs_rebuild_source_newer);
+  RUN_TEST(rebuild_null_args);
+  RUN_TEST(rebuild_success);
+  RUN_TEST(rebuild_failure);
+  RUN_TEST(rebuild_up_to_date);
+  RUN_TEST(auto_rebuild_null_args);
+  RUN_TEST(auto_rebuild_missing_source);
 
   printf("\nIntegration & Edge Case Tests:\n");
   RUN_TEST(integration_str_and_arr);
