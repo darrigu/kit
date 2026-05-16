@@ -5,24 +5,6 @@
 #include <stdbool.h>
 #include <stddef.h>
 
-//------------------------------------------------------------------------------
-// Logging
-//
-// ## Setting Log Level:
-// Control the verbosity of log messages.
-// `kit_log_set_level(KIT_LOG_DEBUG);`
-//
-// ## Setting Log Output:
-// Redirect logs to a file or to a custom function.
-// `kit_log_set_sink(KIT_LOG_FILE, "my_log.txt");`
-// `kit_log_set_custom(my_log_handler, my_context);`
-//
-// ## Log Levels:
-// KIT_LOG_DEBUG, KIT_LOG_INFO, KIT_LOG_WARN, KIT_LOG_ERROR, KIT_LOG_NONE
-//
-// ## Log Sinks:
-// KIT_LOG_STDERR, KIT_LOG_FILE, KIT_LOG_CUSTOM
-//------------------------------------------------------------------------------
 typedef enum {
   KIT_LOG_DEBUG = 0,
   KIT_LOG_INFO,
@@ -43,28 +25,6 @@ void kit_log_set_level(Kit_Log_Level level);
 void kit_log_set_sink(Kit_Log_Sink sink, const char *file_path);
 void kit_log_set_custom(Kit_Log_Fn fn, void *ctx);
 
-//------------------------------------------------------------------------------
-// String Utilities
-//
-// ## Creating Kit_Str:
-// From a string literal: `KIT_STR("hello")`
-// From a C-string: `kit_str_from("world")`
-// From a buffer: `kit_str_buf(my_char_array, my_len)`
-//
-// ## Basic Operations:
-// Check if empty: `kit_str_empty(my_str)`
-// Equality check: `kit_str_eq(str1, str2)`, `kit_str_eq_cstr(str1, "hello")`
-// Prefix/Suffix check: `kit_str_starts_with(str, prefix)`, `kit_str_ends_with(str, suffix)`
-// Find character: `kit_str_find(str, 'a')`, `kit_str_rfind(str, 'b')` (returns str.len if not found)
-//
-// ## Slicing and Trimming:
-// Get substring: `kit_str_slice(my_str, start_index, end_index)`
-// Trim whitespace: `kit_str_trim_left()`, `kit_str_trim_right()`, `kit_str_trim()`
-//
-// ## Splitting String:
-// Split a string by a delimiter (modifies the original string).
-// `Kit_Str remaining = my_str; Kit_Str token; while (kit_str_split(&remaining, ' ', &token)) { ... }`
-//------------------------------------------------------------------------------
 typedef struct {
   const char *data;
   size_t len;
@@ -94,57 +54,10 @@ static inline Kit_Str kit_str_trim(Kit_Str str);
 
 static inline bool kit_str_split(Kit_Str *str, char delim, Kit_Str *out);
 
-//------------------------------------------------------------------------------
-// Dynamic Arrays (Vectors)
-//
-// ## Declaring an Array:
-// `Kit_Arr(int) my_ints;`
-// `Kit_Arr(char*) my_strs;`
-//
-// ## Reserving Capacity:
-// Ensure the array has enough space for `n` elements.
-// `kit_arr_reserve(&my_ints, 20);`
-//
-// ## Adding Elements:
-// Append an element to the end of the array.
-// `kit_arr_push(&my_ints, 42);`
-// `kit_arr_push(&my_strs, "hello");`
-//
-// ## Removing Elements:
-// Remove and return the last element.
-// `int last_int = kit_arr_pop(&my_ints);`
-//
-// ## Accessing Elements:
-// Get an element at a specific index.
-// `int third_int = kit_arr_get(&my_ints, 2);`
-//
-// ## Freeing Memory:
-// Release the memory allocated for the array.
-// `kit_arr_free(&my_ints);`
-//------------------------------------------------------------------------------
 #define Kit_Arr(T) struct { T *data; size_t len; size_t cap; }
 
 void *kit__arr_grow(void *data, size_t *cap, size_t item_size);
 
-//------------------------------------------------------------------------------
-// Temporary Memory Management
-//
-// ## Allocating Temporary Memory:
-// Allocate memory that will be automatically freed when `kit_temp_reset()` is called,
-// and also at the end of your program's execution.
-// `char *my_temp_buffer = kit_temp_alloc(1024);`
-// `char *my_temp_string = kit_temp_strdup("temporary string");`
-// `char *my_formatted_string = kit_temp_sprintf("%s: %d", "value", 123);`
-//
-// ## Creating Checkpoints:
-// Save the current state of the temporary memory allocator.
-// `size_t checkpoint = kit_temp_save();`
-//
-// ## Resetting or Rewinding:
-// `kit_temp_reset()`: Frees all temporary memory allocated since the last reset or start.
-// `kit_temp_rewind(checkpoint)`: Frees memory allocated after a specific checkpoint,
-//                                restoring the allocator to that state.
-//------------------------------------------------------------------------------
 char *kit_temp_strdup(const char *cstr);
 char *kit_temp_strndup(const char *cstr, size_t size);
 void *kit_temp_alloc(size_t size);
@@ -154,26 +67,6 @@ void kit_temp_reset(void);
 size_t kit_temp_save(void);
 void kit_temp_rewind(size_t checkpoint);
 
-//------------------------------------------------------------------------------
-// Process Execution
-//
-// ## Running a Command:
-// Execute a command string and get its exit status.
-// `Kit_Run_Result result = kit_run("ls -l");`
-//
-// ## Capturing Command Output:
-// Run a command and capture its stdout into a buffer.
-// `char buffer[1024]; Kit_Run_Result result = kit_run_capture("echo hello", buffer, sizeof(buffer));`
-//
-// ## Running with Arguments Array:
-// Execute a command with arguments passed as an array.
-// `const char *args[] = {"grep", "search_term", "file.txt", NULL}; Kit_Run_Result result = kit_run_argv(args);`
-//
-// ## Error Handling:
-// Check the `status` field of `Kit_Run_Result` for errors like:
-// `KIT_OK`, `KIT_ERR_SPAWN`, `KIT_ERR_WAIT`, `KIT_ERR_SIGNAL`, `KIT_ERR_ARGS`, `KIT_ERR_BUF`.
-// Use `kit_strerror(result.status)` for human-readable error messages.
-//------------------------------------------------------------------------------
 typedef enum {
   KIT_OK = 0,
   KIT_ERR_SPAWN,
@@ -195,22 +88,6 @@ Kit_Run_Result kit_run_capture(const char *cmd, char *buf, size_t len);
 Kit_Run_Result kit_run_argv(const char *const argv[]);
 const char *kit_strerror(Kit_Run_Status s);
 
-//------------------------------------------------------------------------------
-// Build Utilities (Auto Rebuild)
-//
-// ## Checking if Rebuild is Needed:
-// Determine if a source file is newer than a binary file.
-// `bool needs_rebuild; if (kit_needs_rebuild("main.c", "main", &needs_rebuild)) { ... }`
-//
-// ## Manual Rebuild:
-// Compile a source file into a binary using a compiler command template.
-// `kit_rebuild("main.c", "main", "gcc %s -o %s");`
-//
-// ## Automatic Rebuild:
-// Checks if a rebuild is needed and if so, performs it and restarts the program.
-// This is typically called at the beginning of `main()`.
-// `if (!kit_auto_rebuild(argc, argv, "main.c", "gcc %s -o %s")) { /* Handle error or continue with old binary */ }`
-//------------------------------------------------------------------------------
 bool kit_needs_rebuild(const char *source, const char *binary, bool *out_needs_rebuild);
 bool kit_rebuild(const char *source, const char *binary, const char *cc_template);
 bool kit_auto_rebuild(int argc, char **argv, const char *source_file, const char *cc_template);
