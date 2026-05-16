@@ -481,6 +481,119 @@ TEST(arr_struct) {
   kit_arr_free(&arr);
 }
 
+TEST(temp_alloc_basic) {
+  size_t initial_bytes_used = kit_temp_save();
+  ASSERT_EQ(initial_bytes_used, 0);
+
+  void *ptr1 = kit_temp_alloc(100);
+  ASSERT_NONNULL(ptr1);
+  size_t after_alloc1 = kit_temp_save();
+  ASSERT_NE(after_alloc1, 0);
+  ASSERT(after_alloc1 >= 100);
+
+  void *ptr2 = kit_temp_alloc(50);
+  ASSERT_NONNULL(ptr2);
+  ASSERT_NE(ptr2, ptr1);
+  size_t after_alloc2 = kit_temp_save();
+  ASSERT(after_alloc2 > after_alloc1);
+
+  kit_temp_reset();
+  ASSERT_EQ(kit_temp_save(), 0);
+}
+
+TEST(temp_strdup) {
+  const char *original = "a temporary string";
+  char *temp_str = kit_temp_strdup(original);
+  ASSERT_NONNULL(temp_str);
+  ASSERT_STREQ(temp_str, original);
+
+  size_t checkpoint = kit_temp_save();
+  kit_temp_reset();
+  ASSERT_EQ(kit_temp_save(), 0);
+}
+
+TEST(temp_strndup) {
+  const char *original = "a temporary string to truncate";
+  size_t len_to_dup = 10;
+  char *temp_str = kit_temp_strndup(original, len_to_dup);
+  ASSERT_NONNULL(temp_str);
+  ASSERT_EQ(strlen(temp_str), len_to_dup);
+  ASSERT(strncmp(temp_str, original, len_to_dup) == 0);
+  ASSERT_EQ(temp_str[len_to_dup], '\0');
+
+  char *temp_str_long = kit_temp_strndup(original, 100);
+  ASSERT_NONNULL(temp_str_long);
+  ASSERT_STREQ(temp_str_long, original);
+
+  kit_temp_reset();
+}
+
+TEST(temp_sprintf) {
+  const char *fmt = "Integer value: %d, String value: %s";
+  int num = 123;
+  const char *str = "test string";
+  char *temp_str = kit_temp_sprintf(fmt, num, str);
+  ASSERT_NONNULL(temp_str);
+
+  char expected[256];
+  snprintf(expected, sizeof(expected), fmt, num, str);
+  ASSERT_STREQ(temp_str, expected);
+
+  kit_temp_reset();
+}
+
+TEST(temp_vsprintf) {
+  double val = 3.14159;
+
+  char *temp_str_from_sprintf = kit_temp_sprintf("Test for vsprintf: %f", val);
+  ASSERT_NONNULL(temp_str_from_sprintf);
+  ASSERT(strstr(temp_str_from_sprintf, "3.14159") != NULL);
+
+  kit_temp_reset();
+}
+
+TEST(temp_save_and_rewind) {
+  size_t checkpoint_initial = kit_temp_save();
+  ASSERT_EQ(checkpoint_initial, 0);
+
+  void *ptr1 = kit_temp_alloc(100);
+  ASSERT_NONNULL(ptr1);
+  size_t checkpoint1 = kit_temp_save();
+  ASSERT_NE(checkpoint1, 0);
+  ASSERT(checkpoint1 >= 100);
+
+  void *ptr2 = kit_temp_alloc(200);
+  ASSERT_NONNULL(ptr2);
+  ASSERT_NE(ptr2, ptr1);
+  size_t checkpoint2 = kit_temp_save();
+  ASSERT(checkpoint2 > checkpoint1);
+  ASSERT(checkpoint2 >= checkpoint1 + 200);
+
+  kit_temp_rewind(checkpoint1);
+  size_t after_rewind1 = kit_temp_save();
+  ASSERT_EQ(after_rewind1, checkpoint1);
+
+  void *ptr3 = kit_temp_alloc(50);
+  ASSERT_NONNULL(ptr3);
+  size_t after_rewind_alloc = kit_temp_save();
+  ASSERT(after_rewind_alloc > checkpoint1);
+  ASSERT(after_rewind_alloc < checkpoint2);
+
+  kit_temp_rewind(0);
+  ASSERT_EQ(kit_temp_save(), 0);
+
+  void *ptr4 = kit_temp_alloc(10);
+  ASSERT_NONNULL(ptr4);
+  size_t before_invalid_rewind = kit_temp_save();
+  ASSERT_NE(before_invalid_rewind, 0);
+
+  kit_temp_rewind(before_invalid_rewind + 100);
+  ASSERT_EQ(kit_temp_save(), before_invalid_rewind);
+
+  kit_temp_reset();
+  ASSERT_EQ(kit_temp_save(), 0);
+}
+
 TEST(run_null_cmd) {
   Kit_Run_Result r = kit_run(NULL);
   ASSERT_EQ(r.status, KIT_ERR_ARGS);
@@ -870,14 +983,16 @@ int main(int argc, char **argv) {
   if (!kit_auto_rebuild(argc, argv, __FILE__, "cc -Wall -o %s %s"))
     return 1;
 
-  printf("Kit_Log Tests:\n");
+  printf("Kit Tests:\n");
+
+  printf("\n--- Logging Tests ---\n");
   RUN_TEST(log_set_level);
   RUN_TEST(log_custom_handler);
   RUN_TEST(log_file_sink);
   RUN_TEST(log_level_filtering);
   RUN_TEST(log_null_file_path);
 
-  printf("\nKit_Str Tests:\n");
+  printf("\n--- String Utilities Tests ---\n");
   RUN_TEST(str_from_null);
   RUN_TEST(str_from_string);
   RUN_TEST(str_buf);
@@ -895,7 +1010,7 @@ int main(int argc, char **argv) {
   RUN_TEST(str_split);
   RUN_TEST(str_macro);
 
-  printf("\nKit_Arr Tests:\n");
+  printf("\n--- Dynamic Arrays Tests ---\n");
   RUN_TEST(arr_basic);
   RUN_TEST(arr_push_multiple);
   RUN_TEST(arr_pop);
@@ -904,7 +1019,15 @@ int main(int argc, char **argv) {
   RUN_TEST(arr_strings);
   RUN_TEST(arr_struct);
 
-  printf("\nKit_Run Tests:\n");
+  printf("\n--- Temporary Memory Management Tests ---\n");
+  RUN_TEST(temp_alloc_basic);
+  RUN_TEST(temp_strdup);
+  RUN_TEST(temp_strndup);
+  RUN_TEST(temp_sprintf);
+  RUN_TEST(temp_vsprintf);
+  RUN_TEST(temp_save_and_rewind);
+
+  printf("\n--- Process Execution Tests ---\n");
   RUN_TEST(run_null_cmd);
   RUN_TEST(run_success);
   RUN_TEST(run_failure);
@@ -920,7 +1043,7 @@ int main(int argc, char **argv) {
   RUN_TEST(run_argv_nonexistent);
   RUN_TEST(run_argv_multicmd);
 
-  printf("\nKit_Rebuild Tests:\n");
+  printf("\n--- Build Utilities Tests ---\n");
   RUN_TEST(needs_rebuild_null_args);
   RUN_TEST(needs_rebuild_missing_source);
   RUN_TEST(needs_rebuild_missing_binary);
@@ -933,17 +1056,21 @@ int main(int argc, char **argv) {
   RUN_TEST(auto_rebuild_null_args);
   RUN_TEST(auto_rebuild_missing_source);
 
-  printf("\nIntegration & Edge Case Tests:\n");
+  printf("\n--- Integration & Edge Case Tests ---\n");
   RUN_TEST(integration_str_and_arr);
   RUN_TEST(integration_path_parsing);
   RUN_TEST(integration_command_builder);
   RUN_TEST(edge_case_empty_strings);
   RUN_TEST(edge_case_single_char);
   RUN_TEST(edge_case_unicode_like);
+
+  printf("\n--- Performance Tests ---\n");
   RUN_TEST(performance_arr_growth);
 
   printf("\n=========================\n");
-  printf("Tests: %d | Passed: %d | Failed: %d\n", tests_run, tests_passed, tests_failed);
+  printf("Total Tests Run: %d\n", tests_run);
+  printf("Tests Passed:    %d\n", tests_passed);
+  printf("Tests Failed:    %d\n", tests_failed);
   printf("=========================\n");
 
   return tests_failed > 0 ? 1 : 0;

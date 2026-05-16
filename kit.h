@@ -155,6 +155,33 @@ void *kit__arr_grow(void *data, size_t *cap, size_t item_size);
   } while (0)
 
 //------------------------------------------------------------------------------
+// Temporary Memory Management
+//
+// ## Allocating Temporary Memory:
+// Allocate memory that will be automatically freed when `kit_temp_reset()` is called.
+// `char *my_temp_buffer = kit_temp_alloc(1024);`
+// `char *my_temp_string = kit_temp_strdup("temporary string");`
+// `char *my_formatted_string = kit_temp_sprintf("%s: %d", "value", 123);`
+//
+// ## Creating Checkpoints:
+// Save the current state of the temporary memory allocator.
+// `size_t checkpoint = kit_temp_save();`
+//
+// ## Resetting or Rewinding:
+// `kit_temp_reset()`: Frees all temporary memory allocated since the last reset or start.
+// `kit_temp_rewind(checkpoint)`: Frees memory allocated after a specific checkpoint,
+//                                restoring the allocator to that state.
+//------------------------------------------------------------------------------
+char *kit_temp_strdup(const char *cstr);
+char *kit_temp_strndup(const char *cstr, size_t size);
+void *kit_temp_alloc(size_t size);
+char *kit_temp_sprintf(const char *format, ...);
+char *kit_temp_vsprintf(const char *format, va_list ap);
+void kit_temp_reset(void);
+size_t kit_temp_save(void);
+void kit_temp_rewind(size_t checkpoint);
+
+//------------------------------------------------------------------------------
 // Process Execution
 //
 // ## Running a Command:
@@ -219,6 +246,8 @@ bool kit_auto_rebuild(int argc, char **argv, const char *source_file, const char
 
 #include <ctype.h>
 #include <errno.h>
+#include <inttypes.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -395,6 +424,162 @@ void *kit__arr_grow(void *data, size_t *cap, size_t item_size) {
   }
   *cap = new_cap;
   return new_data;
+}
+
+typedef struct Kit__Temp_Block {
+  struct Kit__Temp_Block *next;
+  size_t size;
+  size_t used;
+  char data[];
+} Kit__Temp_Block;
+
+typedef struct {
+  Kit__Temp_Block *head;
+  Kit__Temp_Block *current;
+  size_t block_size;
+} Kit__Temp_Allocator;
+
+static Kit__Temp_Allocator kit__temp_allocator = {
+  .head = NULL,
+  .current = NULL,
+  .block_size = 4096,
+};
+
+static Kit__Temp_Block *kit__temp_alloc_block(size_t size) {
+  Kit__Temp_Block *new_block = malloc(sizeof(Kit__Temp_Block) + size);
+  if (!new_block) {
+    kit__log(KIT_LOG_ERROR, "kit__temp_alloc_block: out of memory");
+    return NULL;
+  }
+  new_block->next = NULL;
+  new_block->size = size;
+  new_block->used = 0;
+  return new_block;
+}
+
+static void *kit__temp_ensure_space(size_t size) {
+  if (!kit__temp_allocator.current || kit__temp_allocator.current->used + size > kit__temp_allocator.current->size) {
+    size_t new_block_size = kit__temp_allocator.block_size;
+    if (size > new_block_size) {
+      new_block_size = size;
+    }
+    Kit__Temp_Block *new_block = kit__temp_alloc_block(new_block_size);
+    if (!new_block) {
+      return NULL;
+    }
+
+    new_block->next = kit__temp_allocator.head;
+    kit__temp_allocator.head = new_block;
+    kit__temp_allocator.current = new_block;
+  }
+  return kit__temp_allocator.current->data + kit__temp_allocator.current->used;
+}
+
+char *kit_temp_strdup(const char *cstr) {
+  if (!cstr) return NULL;
+  size_t len = strlen(cstr) + 1;
+  char *new_str = kit_temp_alloc(len);
+  if (new_str) {
+    memcpy(new_str, cstr, len);
+  }
+  return new_str;
+}
+
+char *kit_temp_strndup(const char *cstr, size_t size) {
+  if (!cstr) return NULL;
+  char *new_str = kit_temp_alloc(size + 1);
+  if (new_str) {
+    memcpy(new_str, cstr, size);
+    new_str[size] = '\0';
+  }
+  return new_str;
+}
+
+void *kit_temp_alloc(size_t size) {
+  if (size == 0) return NULL;
+  void *ptr = kit__temp_ensure_space(size);
+  if (!ptr) {
+    return NULL;
+  }
+
+  kit__temp_allocator.current->used = ((uintptr_t)ptr - (uintptr_t)kit__temp_allocator.current->data) + size;
+
+  return ptr;
+}
+
+char *kit_temp_sprintf(const char *format, ...) {
+  va_list ap;
+  va_start(ap, format);
+  char *result = kit_temp_vsprintf(format, ap);
+  va_end(ap);
+  return result;
+}
+
+char *kit_temp_vsprintf(const char *format, va_list ap) {
+  va_list ap_copy;
+
+  va_copy(ap_copy, ap);
+  int len = vsnprintf(NULL, 0, format, ap);
+  va_end(ap_copy);
+
+  if (len < 0) {
+    kit__log(KIT_LOG_ERROR, "kit_temp_vsprintf: vsnprintf failed");
+    return NULL;
+  }
+
+  size_t required_size = len + 1;
+  char *buffer = kit_temp_alloc(required_size);
+  if (!buffer) {
+    return NULL;
+  }
+
+  va_copy(ap_copy, ap);
+  vsnprintf(buffer, required_size, format, ap_copy);
+  va_end(ap_copy);
+
+  return buffer;
+}
+
+void kit_temp_reset(void) {
+  Kit__Temp_Block *block = kit__temp_allocator.head;
+  while (block) {
+    Kit__Temp_Block *next = block->next;
+    free(block);
+    block = next;
+  }
+  kit__temp_allocator.head = NULL;
+  kit__temp_allocator.current = NULL;
+}
+
+size_t kit_temp_save(void) {
+  if (!kit__temp_allocator.current) {
+    return 0;
+  }
+  return kit__temp_allocator.current->used;
+}
+
+void kit_temp_rewind(size_t checkpoint) {
+  if (!kit__temp_allocator.current) {
+    if (checkpoint == 0) {
+      kit_temp_reset();
+    }
+    return;
+  }
+
+  if (checkpoint == 0) {
+    kit_temp_reset();
+    return;
+  }
+
+  if (checkpoint > kit__temp_allocator.current->used) {
+    kit__log(KIT_LOG_WARN, "kit_temp_rewind: checkpoint %zu is beyond current usage %zu, ignoring", checkpoint, kit__temp_allocator.current->used);
+    return;
+  }
+
+  if (checkpoint <= kit__temp_allocator.current->used) {
+    kit__temp_allocator.current->used = checkpoint;
+    return;
+  }
 }
 
 const char *kit_strerror(Kit_Run_Status s) {
