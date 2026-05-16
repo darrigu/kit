@@ -285,7 +285,20 @@ void kit_log_set_level(Kit_Log_Level level) {
   kit__log_state.level = level;
 }
 
+static void kit__log_cleanup(void) {
+  if (kit__log_state.file) {
+    fclose(kit__log_state.file);
+    kit__log_state.file = NULL;
+  }
+}
+
 void kit_log_set_sink(Kit_Log_Sink sink, const char *file_path) {
+  static bool cleanup_registered = false;
+  if (!cleanup_registered) {
+    atexit(kit__log_cleanup);
+    cleanup_registered = true;
+  }
+
   if (kit__log_state.file) {
     fclose(kit__log_state.file);
     kit__log_state.file = NULL;
