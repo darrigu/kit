@@ -507,7 +507,6 @@ TEST(temp_strdup) {
   ASSERT_NONNULL(temp_str);
   ASSERT_STREQ(temp_str, original);
 
-  size_t checkpoint = kit_temp_save();
   kit_temp_reset();
   ASSERT_EQ(kit_temp_save(), 0);
 }

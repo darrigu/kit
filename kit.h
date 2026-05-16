@@ -158,7 +158,8 @@ void *kit__arr_grow(void *data, size_t *cap, size_t item_size);
 // Temporary Memory Management
 //
 // ## Allocating Temporary Memory:
-// Allocate memory that will be automatically freed when `kit_temp_reset()` is called.
+// Allocate memory that will be automatically freed when `kit_temp_reset()` is called,
+// and also at the end of your program's execution.
 // `char *my_temp_buffer = kit_temp_alloc(1024);`
 // `char *my_temp_string = kit_temp_strdup("temporary string");`
 // `char *my_formatted_string = kit_temp_sprintf("%s: %d", "value", 123);`
@@ -445,6 +446,15 @@ static Kit__Temp_Allocator kit__temp_allocator = {
   .block_size = 4096,
 };
 
+static bool temp_alloc_atexit_registered = false;
+
+static void kit__temp_init(void) {
+  if (!temp_alloc_atexit_registered) {
+    atexit(kit_temp_reset);
+    temp_alloc_atexit_registered = true;
+  }
+}
+
 static Kit__Temp_Block *kit__temp_alloc_block(size_t size) {
   Kit__Temp_Block *new_block = malloc(sizeof(Kit__Temp_Block) + size);
   if (!new_block) {
@@ -458,6 +468,8 @@ static Kit__Temp_Block *kit__temp_alloc_block(size_t size) {
 }
 
 static void *kit__temp_ensure_space(size_t size) {
+  kit__temp_init();
+
   if (!kit__temp_allocator.current || kit__temp_allocator.current->used + size > kit__temp_allocator.current->size) {
     size_t new_block_size = kit__temp_allocator.block_size;
     if (size > new_block_size) {
@@ -497,6 +509,7 @@ char *kit_temp_strndup(const char *cstr, size_t size) {
 
 void *kit_temp_alloc(size_t size) {
   if (size == 0) return NULL;
+
   void *ptr = kit__temp_ensure_space(size);
   if (!ptr) {
     return NULL;
@@ -846,6 +859,5 @@ bool kit_auto_rebuild(int argc, char **argv, const char *source_file, const char
 #endif
 #endif
 
-// TODO: temporary memory utilities
-// TODO: arena allocator
+// TODO: extract the arena allocator from temporary allocator
 // TODO: command-line flags parsing
