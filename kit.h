@@ -625,10 +625,7 @@ void kit_temp_rewind(size_t checkpoint) {
     return;
   }
 
-  if (checkpoint <= kit__temp_allocator.current->used) {
-    kit__temp_allocator.current->used = checkpoint;
-    return;
-  }
+  kit__temp_allocator.current->used = checkpoint;
 }
 
 const char *kit_strerror(Kit_Run_Status s) {
