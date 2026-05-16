@@ -126,34 +126,6 @@ static inline bool kit_str_split(Kit_Str *str, char delim, Kit_Str *out);
 
 void *kit__arr_grow(void *data, size_t *cap, size_t item_size);
 
-// FIXME: should allocate all required memory at once
-#define kit_arr_reserve(arr, n)                                                \
-  do {                                                                         \
-    while ((arr)->cap < (size_t)(n)) {                                         \
-      (arr)->data =                                                            \
-          kit__arr_grow((arr)->data, &(arr)->cap, sizeof(*(arr)->data));       \
-    }                                                                          \
-  } while (0)
-
-#define kit_arr_push(arr, item)                                                \
-  do {                                                                         \
-    if ((arr)->len >= (arr)->cap)                                              \
-      (arr)->data =                                                            \
-          kit__arr_grow((arr)->data, &(arr)->cap, sizeof(*(arr)->data));       \
-    (arr)->data[(arr)->len++] = (item);                                        \
-  } while (0)
-
-#define kit_arr_pop(arr) (assert((arr)->len > 0), (arr)->data[--(arr)->len])
-#define kit_arr_get(arr, i) (assert((i) < (arr)->len), (arr)->data[(i)])
-
-#define kit_arr_free(arr)                                                      \
-  do {                                                                         \
-    free((arr)->data);                                                         \
-    (arr)->data = NULL;                                                        \
-    (arr)->len = 0;                                                            \
-    (arr)->cap = 0;                                                            \
-  } while (0)
-
 //------------------------------------------------------------------------------
 // Temporary Memory Management
 //
@@ -430,6 +402,53 @@ void *kit__arr_grow(void *data, size_t *cap, size_t item_size) {
   *cap = new_cap;
   return new_data;
 }
+
+// FIXME: should allocate all required memory at once
+#define kit_arr_reserve(arr, n)                                                \
+  do {                                                                         \
+    while ((arr)->cap < (size_t)(n)) {                                         \
+      (arr)->data =                                                            \
+          kit__arr_grow((arr)->data, &(arr)->cap, sizeof(*(arr)->data));       \
+    }                                                                          \
+  } while (0)
+
+#define kit_arr_push(arr, item)                                                \
+  do {                                                                         \
+    if ((arr)->len >= (arr)->cap)                                              \
+      (arr)->data =                                                            \
+          kit__arr_grow((arr)->data, &(arr)->cap, sizeof(*(arr)->data));       \
+    (arr)->data[(arr)->len++] = (item);                                        \
+  } while (0)
+
+static inline void kit__arr_bounds_error(const char *op, size_t index, size_t len, const char *file, int line) {
+  fprintf(stderr, "[kit] array bounds error: %s index=%zu len=%zu at %s:%d\n", op, index, len, file, line);
+  fflush(stderr);
+  abort();
+}
+
+#define kit_arr_get(arr, i)                                                    \
+  ((i) < (arr)->len ? (arr)->data[(i)] :                                       \
+   (kit__arr_bounds_error("get", (i), (arr)->len, __FILE__, __LINE__),         \
+    (arr)->data[0]))
+
+#define kit_arr_pop(arr)                                                       \
+  ((arr)->len > 0 ? (arr)->data[--(arr)->len] :                                \
+   (kit__arr_bounds_error("pop", 0, 0, __FILE__, __LINE__),                    \
+    (arr)->data[0]))
+
+#define kit_arr_try_get(arr, i, out_ptr)                                       \
+  ((i) < (arr)->len ? (*(out_ptr) = (arr)->data[(i)], true) : false)
+
+#define kit_arr_try_pop(arr, out_ptr)                                          \
+  ((arr)->len > 0 ? (*(out_ptr) = (arr)->data[--(arr)->len], true) : false)
+
+#define kit_arr_free(arr)                                                      \
+  do {                                                                         \
+    free((arr)->data);                                                         \
+    (arr)->data = NULL;                                                        \
+    (arr)->len = 0;                                                            \
+    (arr)->cap = 0;                                                            \
+  } while (0)
 
 typedef struct Kit__Temp_Block {
   struct Kit__Temp_Block *next;
